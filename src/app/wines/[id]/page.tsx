@@ -9,7 +9,14 @@ import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
+import {
+  Eyebrow,
+  PageContainer,
+  PageHero,
+  PageIntro,
+  PageShell,
+  PageTitle,
+} from "@/components/ui/page-shell";
 
 type DetectedImageFormat = "heic" | "jpeg" | "png" | "gif" | "webp" | "unknown";
 type HeicConverter = (options: { blob: Blob; type: string; quality: number }) => Promise<Blob | Blob[]>;
@@ -79,7 +86,7 @@ async function convertIfNeeded(file: File): Promise<File> {
   }
 
   // Stage 2: heic-to ships a newer libheif build than heic2any.
-  const mod = (await import("heic-to")) as HeicModule;
+  const mod = (await import("heic-to")) as unknown as HeicModule;
   const converter =
     typeof mod.heicTo === "function"
       ? mod.heicTo
@@ -102,13 +109,13 @@ type Wine = {
   producer_id: number | null;
   subregion_id: number | null;
   producers: { name: string } | null;
-  countries: { name: string } | null;
-  regions: { name: string } | null;
-  subregions: { name: string } | null;
+  countries: { name: string; notes: string | null } | null;
+  regions: { name: string; notes: string | null } | null;
+  subregions: { name: string; notes: string | null } | null;
 };
 
 type GrapeLink = {
-  grapes: { name: string } | null;
+  grapes: { name: string; notes: string | null } | null;
 };
 
 type Tasting = {
@@ -154,6 +161,7 @@ export default function WineDetailPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [similar, setSimilar] = useState<SimilarWine[]>([]);
   const [grapes, setGrapes] = useState<string[]>([]);
+  const [grapeNotes, setGrapeNotes] = useState<{ name: string; notes: string }[]>([]);
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -185,14 +193,14 @@ export default function WineDetailPage() {
         .from("wines")
         .select(`
           id, name, vintage_year, cover_photo_url, producer_id, subregion_id,
-          producers(name), countries(name), regions(name), subregions(name)
+          producers(name), countries(name,notes), regions(name,notes), subregions(name,notes)
         `)
         .eq("id", id)
         .maybeSingle();
 
       if (wErr) { alert(wErr.message); return; }
       if (!w) { setNotFound(true); return; }
-      setWine(w as Wine);
+      setWine(w as unknown as Wine);
 
       const [{ data: ts }, { data: ps }, { data: grapeLinks, error: grapeError }] = await Promise.all([
         supabase
@@ -207,21 +215,28 @@ export default function WineDetailPage() {
           .order("created_at", { ascending: true }),
         supabase
           .from("wine_grapes")
-          .select("grapes(name)")
+          .select("grapes(name,notes)")
           .eq("wine_id", id),
       ]);
 
       setTastings((ts ?? []) as Tasting[]);
       setPhotos((ps ?? []) as Photo[]);
       if (grapeError) { alert(grapeError.message); return; }
+      const grapeRows = (grapeLinks ?? []) as unknown as GrapeLink[];
       setGrapes(normalizeGrapeList(
-        ((grapeLinks ?? []) as GrapeLink[])
+        grapeRows
           .map((row) => row.grapes?.name)
           .filter((value): value is string => Boolean(value))
       ));
+      setGrapeNotes(
+        grapeRows
+          .filter((row) => row.grapes?.name && row.grapes?.notes)
+          .map((row) => ({ name: row.grapes!.name, notes: row.grapes!.notes! }))
+          .sort((a, b) => a.name.localeCompare(b.name))
+      );
 
       // Similar wines
-      const wTyped = w as Wine;
+      const wTyped = w as unknown as Wine;
       const filters: string[] = [];
       if (wTyped.producer_id) filters.push(`producer_id.eq.${wTyped.producer_id}`);
       if (wTyped.subregion_id) filters.push(`subregion_id.eq.${wTyped.subregion_id}`);
@@ -331,6 +346,7 @@ export default function WineDetailPage() {
 
   async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>, target: string) {
     const file = e.target.files?.[0];
+    if (!file) return;
     await uploadPhotoFile(file, target);
     e.target.value = "";
   }
@@ -372,27 +388,21 @@ export default function WineDetailPage() {
   function renderPhotoAddForm(target: string) {
     return (
       <div
-        className="mt-2 p-3 bg-gray-50 rounded-lg border space-y-2"
+        className="mt-3 rounded-2xl border border-stone-200 bg-stone-50 p-4 space-y-3"
         onPaste={e => handlePaste(e, target)}
       >
         <div className="flex gap-2">
-          <input
+          <Input
             type="text"
-            className="border rounded px-2 py-1 text-sm flex-1"
             placeholder="Paste image URL from the web…"
             value={photoUrl}
             onChange={e => setPhotoUrl(e.target.value)}
           />
-          <button
-            onClick={() => addPhotoByUrl(target)}
-            className="px-2 py-1 text-sm rounded bg-black text-white whitespace-nowrap"
-          >
-            Add
-          </button>
+          <Button onClick={() => addPhotoByUrl(target)} className="shrink-0">Add</Button>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="text-xs text-gray-400">paste an image with Cmd/Ctrl+V or upload from device</span>
-          <label className="cursor-pointer px-2 py-1 border rounded text-xs hover:bg-gray-100">
+        <div className="flex items-center gap-3 text-xs text-stone-500">
+          <span>Paste with Cmd/Ctrl+V · or</span>
+          <label className="cursor-pointer rounded-xl border border-stone-200 bg-white px-3 py-1.5 font-medium transition hover:bg-stone-50">
             {uploading ? "Uploading…" : "Choose file"}
             <input
               type="file"
@@ -403,7 +413,7 @@ export default function WineDetailPage() {
           </label>
           <button
             onClick={() => { setPhotoTarget(null); setPhotoUrl(""); }}
-            className="text-xs text-gray-400 underline ml-auto"
+            className="ml-auto text-stone-400 transition hover:text-stone-700"
           >
             Cancel
           </button>
@@ -443,10 +453,9 @@ export default function WineDetailPage() {
   // ── Early returns ────────────────────────────────────────────────────────────
 
   if (notFound) return (
-    <PageShell className="py-16">
+    <PageShell>
       <PageContainer className="max-w-3xl">
         <p className="text-stone-600">Wine not found.</p>
-        <Link href="/wines" className="mt-2 inline-block text-sm underline">← My wines</Link>
       </PageContainer>
     </PageShell>
   );
@@ -466,21 +475,23 @@ export default function WineDetailPage() {
   return (
     <PageShell>
       <PageContainer className="max-w-4xl pb-16">
-        <PageHero className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <Eyebrow>Wine Detail</Eyebrow>
+        <div className="flex items-start justify-between gap-4">
+          <PageHero>
+            <Eyebrow>Cellar</Eyebrow>
             <PageTitle>{wine.name}</PageTitle>
             <PageIntro>
-              {meta || "Bottle detail, tasting history, photos, and similar wines."}
+              {wine.vintage_year ?? "NV"}{meta ? ` · ${meta}` : ""}
             </PageIntro>
-          </div>
-          <div className="flex items-center gap-3">
-            <Link href="/wines" className="text-sm text-stone-600 underline-offset-4 hover:underline">← My wines</Link>
-            <Button variant="secondary" asChild>
-              <Link href={`/wines/${id}/edit`}>Edit Wine</Link>
-            </Button>
-          </div>
-        </PageHero>
+            {grapes.length > 0 && (
+              <div className="mt-3">
+                <Badge>{grapes.join(", ")}</Badge>
+              </div>
+            )}
+          </PageHero>
+          <Button variant="secondary" asChild className="mt-4 shrink-0 rounded-2xl px-4">
+            <Link href={`/wines/${id}/edit`}>Edit Wine</Link>
+          </Button>
+        </div>
 
         {wine.cover_photo_url && (
           <div className="mt-8 overflow-hidden rounded-[28px] border border-stone-200 bg-stone-100 aspect-video">
@@ -488,31 +499,49 @@ export default function WineDetailPage() {
           </div>
         )}
 
-        <Card className="mt-6">
-          <div className="flex flex-wrap items-start justify-between gap-4">
-            <div>
-              <CardTitle className="flex items-center gap-3">
-                <span>{wine.name}</span>
-                <span className="text-xl font-normal text-stone-500">{wine.vintage_year ?? "NV"}</span>
-              </CardTitle>
-              {meta && <CardDescription className="mt-2">{meta}</CardDescription>}
+        {(wine.countries?.notes || wine.regions?.notes || wine.subregions?.notes || grapeNotes.length > 0) && (
+          <Card className="mt-6">
+            <CardTitle className="text-xl">Knowledge Notes</CardTitle>
+            <CardDescription className="mt-1">Notes about this wine&apos;s origin and grapes.</CardDescription>
+            <div className="mt-4 space-y-4">
+              {wine.countries?.notes && (
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.countries.name}</div>
+                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.countries.notes}</p>
+                </div>
+              )}
+              {wine.regions?.notes && (
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.regions.name}</div>
+                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.regions.notes}</p>
+                </div>
+              )}
+              {wine.subregions?.notes && (
+                <div>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.subregions.name}</div>
+                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.subregions.notes}</p>
+                </div>
+              )}
+              {grapeNotes.map(({ name, notes }) => (
+                <div key={name}>
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{name}</div>
+                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{notes}</p>
+                </div>
+              ))}
             </div>
-            {grapes.length > 0 ? <Badge>{grapes.join(", ")}</Badge> : null}
-          </div>
-        </Card>
+          </Card>
+        )}
 
         <Card className="mt-6">
           <div className="mb-3 flex items-center justify-between">
             <div>
               <CardTitle className="text-2xl">Tasting Notes</CardTitle>
               <CardDescription className="mt-2">
-                Keep structured notes over time for the same bottle or label.
+                Track how this wine evolves across different tastings.
               </CardDescription>
             </div>
           {!showAdd && (
-              <Button onClick={() => setShowAdd(true)}>
-              + Add
-              </Button>
+              <Button onClick={() => setShowAdd(true)}>Add Note</Button>
           )}
           </div>
 
@@ -629,7 +658,7 @@ export default function WineDetailPage() {
           <div className="mb-3 flex items-center justify-between">
           <div>
               <CardTitle className="text-2xl">Photos</CardTitle>
-              <CardDescription className="mt-2">Not tied to a specific tasting.</CardDescription>
+              <CardDescription className="mt-2">General photos, not linked to a tasting.</CardDescription>
           </div>
           {photoTarget !== "general" && (
               <Button

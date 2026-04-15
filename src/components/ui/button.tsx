@@ -34,9 +34,10 @@ export function Button({
   if (asChild) {
     if (!isValidElement(children)) return null;
 
+    const childProps = children.props as Record<string, unknown>;
     return cloneElement(children, {
-      className: cn(classes, children.props.className),
-    });
+      className: cn(classes, childProps.className as string | undefined),
+    } as Parameters<typeof cloneElement>[1]);
   }
 
   return (

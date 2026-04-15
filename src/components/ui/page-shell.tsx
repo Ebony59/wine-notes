@@ -6,7 +6,7 @@ export function PageShell({ className, ...props }: DivProps) {
   return (
     <main
       className={cn(
-        "min-h-screen bg-[linear-gradient(180deg,rgba(255,249,240,0.94)_0%,rgba(245,235,221,0.86)_100%)] px-4 py-10 sm:px-6 lg:px-8",
+        "min-h-screen bg-[linear-gradient(180deg,rgba(255,249,240,0.94)_0%,rgba(245,235,221,0.86)_100%)] px-4 pb-12 pt-8 sm:px-6 lg:px-8",
         className
       )}
       {...props}

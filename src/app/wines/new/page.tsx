@@ -1,6 +1,5 @@
 "use client";
 
-import Link from "next/link";
 import Fuse from "fuse.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
@@ -8,7 +7,7 @@ import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { Field, FieldHint, FieldLabel } from "@/components/ui/field";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
   Eyebrow,
@@ -17,8 +16,6 @@ import {
   PageIntro,
   PageShell,
   PageTitle,
-  PageTopBar,
-  PageTopNav,
 } from "@/components/ui/page-shell";
 import { Textarea } from "@/components/ui/textarea";
 
@@ -89,7 +86,7 @@ export default function AddWinePage() {
       return;
     }
 
-    setExistingWines((data as ExistingWine[]) ?? []);
+    setExistingWines((data as unknown as ExistingWine[]) ?? []);
   }, [supabase]);
 
   useEffect(() => {
@@ -378,27 +375,16 @@ export default function AddWinePage() {
   return (
     <PageShell>
       <PageContainer className="max-w-2xl">
-        <PageTopBar>
-          <Eyebrow className="pt-1">Add Wine</Eyebrow>
-          <PageTopNav>
-            <Button asChild variant="ghost" className="min-h-11 w-full rounded-2xl px-4 sm:w-auto">
-              <Link href="/wines">My wines</Link>
-            </Button>
-          </PageTopNav>
-        </PageTopBar>
-
         <PageHero>
-          <PageTitle>Add a bottle and optionally capture the first tasting note.</PageTitle>
+          <Eyebrow>Add Wine</Eyebrow>
+          <PageTitle>Log a new bottle to your cellar</PageTitle>
           <PageIntro>
-            Start with the wine details. Lookup values can be reused from existing data or created as you save.
+            Fill in what you know — leave unknown fields as NA. You can add more notes and photos after saving.
           </PageIntro>
         </PageHero>
 
         <Card className="mt-8">
           <CardTitle>Wine Details</CardTitle>
-          <CardDescription className="mt-2">
-            Use <strong>NA</strong> for unknown location or producer fields. Vintage also accepts <strong>NV</strong>.
-          </CardDescription>
 
           <div className="mt-6 grid gap-4">
             <Field>
@@ -575,9 +561,6 @@ export default function AddWinePage() {
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
               <Button onClick={saveWine}>Save Wine</Button>
-              <FieldHint className="mt-0">
-                Tip: You can add more tasting notes and photos after saving.
-              </FieldHint>
             </div>
           </div>
         </Card>

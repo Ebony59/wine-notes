@@ -1,165 +1,115 @@
 "use client";
 
-import Fuse from "fuse.js";
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
+import {
+  Eyebrow,
+  PageContainer,
+  PageHero,
+  PageIntro,
+  PageShell,
+  PageTitle,
+} from "@/components/ui/page-shell";
 
-type Country = {
-  id: number;
-  name: string;
-};
+// ── Icons ──────────────────────────────────────────────────────────────────────
 
-type Region = {
-  id: number;
-  name: string;
-  country_id: number | null;
-  countries: { name: string } | null;
-};
-
-type Subregion = {
-  id: number;
-  name: string;
-  region_id: number | null;
-  regions: { name: string } | null;
-};
-
-type Grape = {
-  id: number;
-  name: string;
-};
-
-type LookupItem = {
-  id: number;
-  label: string;
-  detail?: string;
-};
-
-type LookupSectionProps = {
-  title: string;
-  emptyText: string;
-  items: LookupItem[];
-  onRename: (item: { id: number; label: string }) => Promise<void>;
-  onDelete: (item: { id: number; label: string }) => Promise<void>;
-};
-
-function LookupSection({ title, emptyText, items, onRename, onDelete }: LookupSectionProps) {
-  const [query, setQuery] = useState("");
-
-  const fuse = useMemo(
-    () => new Fuse(items, { keys: ["label", "detail"], threshold: 0.35, ignoreLocation: true }),
-    [items]
-  );
-
-  const filteredItems = useMemo(() => {
-    const trimmed = query.trim();
-    if (!trimmed) return items;
-    return fuse.search(trimmed).map((result) => result.item);
-  }, [fuse, items, query]);
-
+function WineGlassIcon() {
   return (
-    <Card className="border-stone-300/80">
-      <div className="flex items-center justify-between gap-3">
-        <div>
-          <h2 className="text-base font-semibold text-stone-900">{title}</h2>
-        </div>
-        <Badge>{String(items.length)}</Badge>
-      </div>
-
-      {items.length === 0 ? (
-        <p className="mt-4 text-sm text-stone-500">{emptyText}</p>
-      ) : (
-        <>
-          <div className="mt-4">
-            <Input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder={`Search ${title.toLowerCase()}...`}
-            />
-          </div>
-
-          {filteredItems.length === 0 ? (
-            <p className="mt-4 text-sm text-stone-500">No matches found.</p>
-          ) : (
-            <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
-              {filteredItems.map((item) => (
-                <div
-                  key={item.id}
-                  className="flex items-start justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3"
-                >
-                  <div>
-                    <div className="text-sm font-medium text-stone-900">{item.label}</div>
-                    {item.detail ? (
-                      <div className="mt-1 text-xs text-stone-500">{item.detail}</div>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => onRename(item)}
-                      className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
-                    >
-                      Rename
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => onDelete(item)}
-                      className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
-                    >
-                      Delete
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
-      )}
-    </Card>
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+      <path d="M8 3h8l-1.5 6A4 4 0 0 1 8 9H8a4 4 0 0 1-6.5-6L3 3" />
+      <path d="M7 3a5 5 0 0 0 10 0" />
+      <path d="M12 13v8" />
+      <path d="M9 21h6" />
+    </svg>
   );
 }
+
+function PlusCircleIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 8v8M8 12h8" />
+    </svg>
+  );
+}
+
+function BookOpenIcon() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
+      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+    </svg>
+  );
+}
+
+function ArrowRightIcon() {
+  return (
+    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition-transform group-hover:translate-x-0.5">
+      <path d="M4 10h12M11 5l5 5-5 5" />
+    </svg>
+  );
+}
+
+// ── Action card ────────────────────────────────────────────────────────────────
+
+type ActionCardProps = {
+  href: string;
+  icon: React.ReactNode;
+  label: string;
+  description: string;
+  primary?: boolean;
+};
+
+function ActionCard({ href, icon, label, description, primary }: ActionCardProps) {
+  if (primary) {
+    return (
+      <Link
+        href={href}
+        className="group flex flex-col gap-4 rounded-[28px] bg-stone-900 p-6 text-stone-50 shadow-[0_8px_32px_rgba(30,14,4,0.20)] transition hover:bg-stone-800 hover:shadow-[0_16px_48px_rgba(30,14,4,0.28)]"
+      >
+        <div className="flex items-start justify-between">
+          <span className="rounded-2xl bg-stone-800 p-3 text-stone-300">{icon}</span>
+          <ArrowRightIcon />
+        </div>
+        <div>
+          <div className="text-lg font-semibold">{label}</div>
+          <div className="mt-1 text-sm leading-relaxed text-stone-400">{description}</div>
+        </div>
+      </Link>
+    );
+  }
+
+  return (
+    <Link
+      href={href}
+      className="group flex flex-col gap-4 rounded-[28px] border border-stone-200 bg-white/80 p-6 shadow-[0_2px_12px_rgba(88,56,34,0.06)] transition hover:border-stone-300 hover:bg-white hover:shadow-[0_12px_40px_rgba(88,56,34,0.11)]"
+    >
+      <div className="flex items-start justify-between">
+        <span className="rounded-2xl border border-stone-100 bg-stone-50 p-3 text-stone-600">{icon}</span>
+        <span className="text-stone-400"><ArrowRightIcon /></span>
+      </div>
+      <div>
+        <div className="text-lg font-semibold text-stone-900">{label}</div>
+        <div className="mt-1 text-sm leading-relaxed text-stone-500">{description}</div>
+      </div>
+    </Link>
+  );
+}
+
+// ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function Home() {
   const supabase = useMemo(() => createClient(), []);
   const [email, setEmail] = useState<string | null>(null);
-  const [countries, setCountries] = useState<Country[]>([]);
-  const [regions, setRegions] = useState<Region[]>([]);
-  const [subregions, setSubregions] = useState<Subregion[]>([]);
-  const [grapes, setGrapes] = useState<Grape[]>([]);
-  const [busyKey, setBusyKey] = useState<string | null>(null);
-
-  const loadLookups = useCallback(async () => {
-    const [countryRes, regionRes, subregionRes, grapeRes] = await Promise.all([
-      supabase.from("countries").select("id,name").order("name"),
-      supabase.from("regions").select("id,name,country_id,countries(name)").order("name"),
-      supabase.from("subregions").select("id,name,region_id,regions(name)").order("name"),
-      supabase.from("grapes").select("id,name").order("name"),
-    ]);
-
-    if (countryRes.error) return alert(countryRes.error.message);
-    if (regionRes.error) return alert(regionRes.error.message);
-    if (subregionRes.error) return alert(subregionRes.error.message);
-    if (grapeRes.error) return alert(grapeRes.error.message);
-
-    setCountries((countryRes.data as Country[]) ?? []);
-    setRegions((regionRes.data as Region[]) ?? []);
-    setSubregions((subregionRes.data as Subregion[]) ?? []);
-    setGrapes((grapeRes.data as Grape[]) ?? []);
-  }, [supabase]);
+  const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      const nextEmail = data.user?.email ?? null;
-      setEmail(nextEmail);
-      if (nextEmail) loadLookups();
+      setEmail(data.user?.email ?? null);
+      setAuthLoaded(true);
     });
-  }, [supabase, loadLookups]);
+  }, [supabase]);
 
   async function signInWithGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -169,314 +119,75 @@ export default function Home() {
     if (error) alert(error.message);
   }
 
-  async function signOut() {
-    await supabase.auth.signOut();
-    setEmail(null);
-  }
-
-  async function renameCountry(item: { id: number; label: string }) {
-    const nextName = prompt("Rename country", item.label)?.trim();
-    if (!nextName || nextName === item.label) return;
-    setBusyKey(`country-rename-${item.id}`);
-    const { error } = await supabase.from("countries").update({ name: nextName }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function deleteCountry(item: { id: number; label: string }) {
-    if (!confirm(`Delete country "${item.label}"? Wines using it will revert to NA.`)) return;
-    setBusyKey(`country-delete-${item.id}`);
-
-    const regionIds = regions.filter((region) => region.country_id === item.id).map((region) => region.id);
-    const subregionIds = subregions
-      .filter((subregion) => regionIds.includes(subregion.region_id ?? -1))
-      .map((subregion) => subregion.id);
-
-    if (subregionIds.length > 0) {
-      const { error } = await supabase
-        .from("wines")
-        .update({ subregion_id: null })
-        .in("subregion_id", subregionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    if (regionIds.length > 0) {
-      const { error } = await supabase
-        .from("wines")
-        .update({ region_id: null })
-        .in("region_id", regionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    {
-      const { error } = await supabase
-        .from("wines")
-        .update({ country_id: null })
-        .eq("country_id", item.id);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    if (subregionIds.length > 0) {
-      const { error } = await supabase.from("subregions").delete().in("id", subregionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    if (regionIds.length > 0) {
-      const { error } = await supabase.from("regions").delete().in("id", regionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    const { error } = await supabase.from("countries").delete().eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function renameRegion(item: { id: number; label: string }) {
-    const nextName = prompt("Rename region", item.label)?.trim();
-    if (!nextName || nextName === item.label) return;
-    setBusyKey(`region-rename-${item.id}`);
-    const { error } = await supabase.from("regions").update({ name: nextName }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function deleteRegion(item: { id: number; label: string }) {
-    if (!confirm(`Delete region "${item.label}"? Wines using it will revert to NA.`)) return;
-    setBusyKey(`region-delete-${item.id}`);
-
-    const subregionIds = subregions
-      .filter((subregion) => subregion.region_id === item.id)
-      .map((subregion) => subregion.id);
-
-    if (subregionIds.length > 0) {
-      const { error } = await supabase
-        .from("wines")
-        .update({ subregion_id: null })
-        .in("subregion_id", subregionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    {
-      const { error } = await supabase
-        .from("wines")
-        .update({ region_id: null })
-        .eq("region_id", item.id);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    if (subregionIds.length > 0) {
-      const { error } = await supabase.from("subregions").delete().in("id", subregionIds);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-
-    const { error } = await supabase.from("regions").delete().eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function renameSubregion(item: { id: number; label: string }) {
-    const nextName = prompt("Rename sub-region", item.label)?.trim();
-    if (!nextName || nextName === item.label) return;
-    setBusyKey(`subregion-rename-${item.id}`);
-    const { error } = await supabase.from("subregions").update({ name: nextName }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function deleteSubregion(item: { id: number; label: string }) {
-    if (!confirm(`Delete sub-region "${item.label}"? Wines using it will revert to NA.`)) return;
-    setBusyKey(`subregion-delete-${item.id}`);
-    {
-      const { error } = await supabase
-        .from("wines")
-        .update({ subregion_id: null })
-        .eq("subregion_id", item.id);
-      if (error) {
-        setBusyKey(null);
-        return alert(error.message);
-      }
-    }
-    const { error } = await supabase.from("subregions").delete().eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function renameGrape(item: { id: number; label: string }) {
-    const nextName = prompt("Rename grape", item.label)?.trim();
-    if (!nextName || nextName === item.label) return;
-    setBusyKey(`grape-rename-${item.id}`);
-    const { error } = await supabase.from("grapes").update({ name: nextName }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function deleteGrape(item: { id: number; label: string }) {
-    if (!confirm(`Delete grape "${item.label}"? Wines using it will lose that grape.`)) return;
-    setBusyKey(`grape-delete-${item.id}`);
-    const { error } = await supabase.from("grapes").delete().eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  const countryItems = countries.map((country) => ({
-    id: country.id,
-    label: country.name,
-  }));
-
-  const regionItems = regions.map((region) => ({
-    id: region.id,
-    label: region.name,
-    detail: region.countries?.name ? `Country: ${region.countries.name}` : "Country: NA",
-  }));
-
-  const subregionItems = subregions.map((subregion) => ({
-    id: subregion.id,
-    label: subregion.name,
-    detail: subregion.regions?.name ? `Region: ${subregion.regions.name}` : "Region: NA",
-  }));
-
-  const grapeItems = grapes.map((grape) => ({
-    id: grape.id,
-    label: grape.name,
-  }));
-
   return (
     <PageShell>
       <PageContainer>
         <PageHero>
           <Eyebrow>Wine Notes</Eyebrow>
-          <PageTitle>Wine Notes</PageTitle>
+          <PageTitle>Your personal cellar journal</PageTitle>
           <PageIntro>
-            Track bottles, tastings, and lookup data in one place.
+            Track bottles, tastings, and the geography behind every glass — all in one place.
           </PageIntro>
         </PageHero>
 
-        <section className="mt-8 rounded-[32px] border border-[#d4c3ae] bg-[radial-gradient(circle_at_top,#fffdf8,transparent_38%),linear-gradient(180deg,#fff7ed_0%,#f7ecdf_100%)] p-4">
-          <Card className="border-[#e7d8c5] bg-white/75 shadow-[0_24px_70px_rgba(102,60,28,0.12)] sm:p-8">
-            <div className="flex items-start justify-between gap-4">
-              <div>
-                <Badge className="mb-3">Dashboard</Badge>
-                <CardTitle>Manage your cellar and the lookup tables behind it.</CardTitle>
-                <CardDescription className="mt-2 max-w-xl">
-                  Browse wines, add new bottles, and keep countries, regions, sub-regions, and grapes tidy.
-                </CardDescription>
-              </div>
-              {busyKey ? (
-                <Badge variant="muted" className="bg-amber-100 text-amber-800">Saving...</Badge>
-              ) : null}
+        {/* Action cards */}
+        <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+          <ActionCard
+            href="/wines"
+            icon={<WineGlassIcon />}
+            label="My Wines"
+            description="Browse your collection by country, region, and producer."
+          />
+          <ActionCard
+            href="/wines/new"
+            icon={<PlusCircleIcon />}
+            label="Add New Wine"
+            description="Record a new bottle or capture a fresh tasting note."
+            primary
+          />
+          <ActionCard
+            href="/knowledge"
+            icon={<BookOpenIcon />}
+            label="My Knowledge"
+            description="Manage countries, regions, sub-regions, and grape varieties."
+          />
+        </div>
+
+        {/* Sign-in prompt for unauthenticated users */}
+        {authLoaded && !email && (
+          <div className="mt-10 flex flex-col items-start gap-4 rounded-[28px] border border-dashed border-stone-300 bg-white/60 px-6 py-7">
+            <div>
+              <p className="text-base font-medium text-stone-800">Ready to start?</p>
+              <p className="mt-1 text-sm text-stone-500">
+                Sign in with Google to save your tasting notes and build your cellar.
+              </p>
             </div>
+            <button
+              type="button"
+              onClick={signInWithGoogle}
+              className="inline-flex items-center gap-2.5 rounded-2xl bg-stone-900 px-5 py-2.5 text-sm font-medium text-white shadow-sm transition hover:bg-stone-700"
+            >
+              {/* Google "G" logo */}
+              <svg viewBox="0 0 18 18" className="h-4 w-4 shrink-0" aria-hidden="true">
+                <path fill="#fff" d="M17.64 9.2c0-.637-.057-1.251-.164-1.84H9v3.481h4.844a4.14 4.14 0 0 1-1.796 2.717v2.258h2.908c1.702-1.567 2.684-3.875 2.684-6.615Z"/>
+                <path fill="#fff" d="M9 18c2.43 0 4.467-.806 5.956-2.18l-2.908-2.259c-.806.54-1.837.86-3.048.86-2.344 0-4.328-1.584-5.036-3.711H.957v2.332A8.997 8.997 0 0 0 9 18Z"/>
+                <path fill="#fff" d="M3.964 10.71A5.41 5.41 0 0 1 3.682 9c0-.593.102-1.17.282-1.71V4.958H.957A8.996 8.996 0 0 0 0 9c0 1.452.348 2.827.957 4.042l3.007-2.332Z"/>
+                <path fill="#fff" d="M9 3.58c1.321 0 2.508.454 3.44 1.345l2.582-2.58C13.463.891 11.426 0 9 0A8.997 8.997 0 0 0 .957 4.958L3.964 7.29C4.672 5.163 6.656 3.58 9 3.58Z"/>
+              </svg>
+              Sign In with Google
+            </button>
+          </div>
+        )}
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <Link
-                href="/wines"
-                className="inline-flex items-center justify-center rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-800 transition hover:border-stone-500"
-              >
-                My Wines
-              </Link>
-              <Link
-                href="/wines/new"
-                className="inline-flex items-center justify-center rounded-2xl bg-stone-900 px-4 py-3 text-sm font-medium text-stone-50 transition hover:bg-stone-700"
-              >
-                Add New Wine
-              </Link>
+        {/* Signed-in account strip */}
+        {authLoaded && email && (
+          <div className="mt-8 flex items-center gap-3 rounded-[20px] border border-stone-200 bg-white/70 px-5 py-3.5">
+            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-stone-100 text-xs font-semibold uppercase text-stone-600">
+              {email[0]}
             </div>
-
-            {email ? (
-              <>
-                <div className="mt-6 rounded-[24px] border border-stone-200 bg-white/80 p-4">
-                  <p className="text-sm text-stone-600">Signed in as</p>
-                  <p className="mt-1 text-base font-semibold text-stone-900">{email}</p>
-                </div>
-
-                <div className="mt-6">
-                  <div className="flex items-end justify-between gap-3">
-                    <div>
-                      <h3 className="font-serif text-2xl text-stone-900">Manage Knowledges</h3>
-                      <p className="mt-1 text-sm text-stone-600">
-                        Rename or delete countries, regions, sub-regions, and grapes.
-                      </p>
-                    </div>
-                    <Badge>4 groups</Badge>
-                  </div>
-
-                  <div className="mt-4 grid gap-4">
-                    <LookupSection
-                      title="Countries"
-                      emptyText="No countries yet."
-                      items={countryItems}
-                      onRename={renameCountry}
-                      onDelete={deleteCountry}
-                    />
-                    <LookupSection
-                      title="Regions"
-                      emptyText="No regions yet."
-                      items={regionItems}
-                      onRename={renameRegion}
-                      onDelete={deleteRegion}
-                    />
-                    <LookupSection
-                      title="Sub-regions"
-                      emptyText="No sub-regions yet."
-                      items={subregionItems}
-                      onRename={renameSubregion}
-                      onDelete={deleteSubregion}
-                    />
-                    <LookupSection
-                      title="Grapes"
-                      emptyText="No grapes yet."
-                      items={grapeItems}
-                      onRename={renameGrape}
-                      onDelete={deleteGrape}
-                    />
-                  </div>
-                </div>
-
-                <Button type="button" variant="secondary" onClick={signOut} className="mt-6 rounded-full">
-                  Sign Out
-                </Button>
-              </>
-            ) : (
-              <div className="mt-6 rounded-[24px] border border-dashed border-stone-300 bg-white/70 p-5">
-                <p className="text-sm text-stone-600">Sign in to start saving tasting notes.</p>
-                <Button type="button" onClick={signInWithGoogle} className="mt-4">
-                  Sign In with Google
-                </Button>
-              </div>
-            )}
-          </Card>
-        </section>
+            <p className="text-sm text-stone-600 truncate">{email}</p>
+          </div>
+        )}
       </PageContainer>
     </PageShell>
   );

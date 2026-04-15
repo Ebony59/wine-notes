@@ -7,10 +7,17 @@ import { createClient } from "@/lib/supabase/client";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Card, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
+import {
+  Eyebrow,
+  PageContainer,
+  PageHero,
+  PageIntro,
+  PageShell,
+  PageTitle,
+} from "@/components/ui/page-shell";
 
 function normalizeField(v: string) {
   const t = v.trim();
@@ -80,7 +87,7 @@ export default function EditWinePage() {
 
       setName(data.name ?? "");
       setVintage(data.vintage_year?.toString() ?? "");
-      const typed = data as EditableWine;
+      const typed = data as unknown as EditableWine;
       setCountry(typed.countries?.name ?? "NA");
       setRegion(typed.regions?.name ?? "NA");
       setSubregion(typed.subregions?.name ?? "NA");
@@ -93,7 +100,7 @@ export default function EditWinePage() {
 
       if (grapeError) { alert(grapeError.message); return; }
       setGrapes(normalizeGrapeList(
-        ((grapeLinks ?? []) as EditableGrapeRow[])
+        ((grapeLinks ?? []) as unknown as EditableGrapeRow[])
           .map((row) => row.grapes?.name)
           .filter((value: string | null | undefined): value is string => Boolean(value))
       ));
@@ -206,10 +213,9 @@ export default function EditWinePage() {
   }
 
   if (notFound) return (
-    <PageShell className="py-16">
+    <PageShell>
       <PageContainer className="max-w-xl">
         <p>Wine not found.</p>
-        <Link href="/wines" className="text-sm underline">← My wines</Link>
       </PageContainer>
     </PageShell>
   );
@@ -225,24 +231,21 @@ export default function EditWinePage() {
   return (
     <PageShell>
       <PageContainer className="max-w-3xl">
-        <PageHero className="flex items-start justify-between gap-4">
-          <div>
+        <div className="flex items-start justify-between gap-4">
+          <PageHero>
             <Eyebrow>Edit Wine</Eyebrow>
-            <PageTitle>Update the bottle details and linked lookups.</PageTitle>
+            <PageTitle>Edit bottle details</PageTitle>
             <PageIntro>
-              Changes here update the wine record and refresh grape links in one save action.
+              Update any fields below — grape links are replaced on save.
             </PageIntro>
-          </div>
-          <Link href={`/wines/${id}`} className="text-sm text-stone-600 underline-offset-4 hover:underline">
-            Cancel
-          </Link>
-        </PageHero>
+          </PageHero>
+          <Button asChild variant="secondary" className="mt-4 shrink-0 rounded-2xl px-4">
+            <Link href={`/wines/${id}`}>Cancel</Link>
+          </Button>
+        </div>
 
         <Card className="mt-8">
           <CardTitle>Wine Details</CardTitle>
-          <CardDescription className="mt-2">
-            Keep unknown fields as <strong>NA</strong>. Vintage also accepts <strong>NV</strong>.
-          </CardDescription>
 
           <div className="mt-6 grid gap-4">
             <Field>
@@ -369,7 +372,7 @@ export default function EditWinePage() {
           >
             <p className="font-serif text-2xl text-stone-900">Delete this wine?</p>
             <p className="mt-2 text-sm text-stone-600">
-              This will remove this wine entry. Grapes, regions, countries, and other knowledge you've added will remain. This cannot be undone.
+              This will remove this wine entry. Grapes, regions, countries, and other knowledge you&apos;ve added will remain. This cannot be undone.
             </p>
             <div className="mt-6 flex gap-3 justify-end">
               <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>

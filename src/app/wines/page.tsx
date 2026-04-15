@@ -7,8 +7,7 @@ import { createClient } from "@/lib/supabase/client";
 import MultiSearchableSelect from "@/components/MultiSearchableSelect";
 import SearchableSelect from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
   Eyebrow,
@@ -17,8 +16,6 @@ import {
   PageIntro,
   PageShell,
   PageTitle,
-  PageTopBar,
-  PageTopNav,
 } from "@/components/ui/page-shell";
 
 type Wine = {
@@ -256,7 +253,7 @@ export default function WinesPage() {
         .limit(50);
 
       if (error) alert(error.message);
-      setWines((data as Wine[]) ?? []);
+      setWines((data as unknown as Wine[]) ?? []);
     }
 
     async function loadCountries() {
@@ -452,22 +449,11 @@ export default function WinesPage() {
   return (
     <PageShell>
       <PageContainer>
-        <PageTopBar>
-          <Eyebrow className="pt-1">Cellar</Eyebrow>
-          <PageTopNav>
-            <Button asChild variant="ghost" className="min-h-11 flex-1 rounded-2xl px-4 sm:flex-none">
-              <Link href="/">Home</Link>
-            </Button>
-            <Button asChild className="min-h-11 flex-1 rounded-2xl px-4 sm:flex-none">
-              <Link href="/wines/new">Add New Wine</Link>
-            </Button>
-          </PageTopNav>
-        </PageTopBar>
-
         <PageHero>
-          <PageTitle>Browse your wines by place and producer.</PageTitle>
+          <Eyebrow>Cellar</Eyebrow>
+          <PageTitle>Browse your wines by place and producer</PageTitle>
           <PageIntro>
-            Search directly, then narrow by country, region, sub-region, or grape.
+            Search by name, or narrow down by country, region, sub-region, and grape.
           </PageIntro>
         </PageHero>
 
@@ -577,11 +563,7 @@ export default function WinesPage() {
         </Card>
 
         <Card className="mt-4">
-          <CardTitle>Wine List</CardTitle>
-          <CardDescription className="mt-2">
-            Grouped by country, then region, then producer.
-          </CardDescription>
-          <div className="mt-5 divide-y divide-stone-200">
+          <div className="divide-y divide-stone-200">
           {groupedWines.map((countryGroup) => {
             return (
               <div key={countryGroup.country} className="py-4 first:pt-0 last:pb-0">
