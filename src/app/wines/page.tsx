@@ -450,8 +450,8 @@ export default function WinesPage() {
     <PageShell>
       <PageContainer>
         <PageHero>
-          <Eyebrow>Cellar</Eyebrow>
-          <PageTitle>Browse your wines by place and producer</PageTitle>
+          <Eyebrow>My Wines</Eyebrow>
+          <PageTitle>Browse your tasting notes</PageTitle>
           <PageIntro>
             Search by name, or narrow down by country, region, sub-region, and grape.
           </PageIntro>

@@ -105,10 +105,26 @@ export default function Home() {
   const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+
     supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return;
       setEmail(data.user?.email ?? null);
       setAuthLoaded(true);
     });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setEmail(session?.user?.email ?? null);
+      setAuthLoaded(true);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   async function signInWithGoogle() {
@@ -124,9 +140,9 @@ export default function Home() {
       <PageContainer>
         <PageHero>
           <Eyebrow>Wine Notes</Eyebrow>
-          <PageTitle>Your personal cellar journal</PageTitle>
+          <PageTitle>Your personal wine journal</PageTitle>
           <PageIntro>
-            Track bottles, tastings, and the geography behind every glass — all in one place.
+            Track bottles, tastings, and the knowledge behind every glass — all in one place.
           </PageIntro>
         </PageHero>
 
@@ -136,7 +152,7 @@ export default function Home() {
             href="/wines"
             icon={<WineGlassIcon />}
             label="My Wines"
-            description="Browse your collection by country, region, and producer."
+            description="Browse your wine tasting notes"
           />
           <ActionCard
             href="/wines/new"

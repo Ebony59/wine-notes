@@ -19,10 +19,26 @@ export function NavBar() {
   const [authLoaded, setAuthLoaded] = useState(false);
 
   useEffect(() => {
+    let mounted = true;
+
     supabase.auth.getUser().then(({ data }) => {
+      if (!mounted) return;
       setEmail(data.user?.email ?? null);
       setAuthLoaded(true);
     });
+
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!mounted) return;
+      setEmail(session?.user?.email ?? null);
+      setAuthLoaded(true);
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, [supabase]);
 
   async function signOut() {
