@@ -509,7 +509,7 @@ export default function WinesPage() {
                 setRegionOptions([]);
                 setSubregionOptions([]);
               }}
-                  className="text-xs text-stone-500 underline"
+                  className="text-xs text-stone-600 underline"
             >
               Clear all
             </button>
@@ -518,7 +518,7 @@ export default function WinesPage() {
 
             <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
               <div>
-                <label className="mb-1 block text-xs text-stone-500">Country</label>
+                <label className="mb-1 block text-xs text-stone-600">Country</label>
             <SearchableSelect
               value={filterCountry}
               onChange={handleCountryChange}
@@ -528,7 +528,7 @@ export default function WinesPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs text-stone-500">Region</label>
+                <label className="mb-1 block text-xs text-stone-600">Region</label>
             <SearchableSelect
               value={filterRegion}
               onChange={handleRegionChange}
@@ -539,7 +539,7 @@ export default function WinesPage() {
               </div>
 
               <div>
-                <label className="mb-1 block text-xs text-stone-500">Sub-region</label>
+                <label className="mb-1 block text-xs text-stone-600">Sub-region</label>
             <SearchableSelect
               value={filterSubregion}
               onChange={setFilterSubregion}
@@ -551,7 +551,7 @@ export default function WinesPage() {
             </div>
 
             <div className="mt-2">
-              <label className="mb-1 block text-xs text-stone-500">Grape</label>
+              <label className="mb-1 block text-xs text-stone-600">Grape</label>
           <MultiSearchableSelect
             values={filterGrapes}
             onChange={setFilterGrapes}

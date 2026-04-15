@@ -124,7 +124,7 @@ export default function MultiSearchableSelect({
           ))}
 
           <input
-            className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-400"
+            className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-500"
             value={query}
             placeholder={values.length === 0 ? placeholder : undefined}
             onChange={(e) => {

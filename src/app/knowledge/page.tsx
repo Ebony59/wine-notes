@@ -45,6 +45,12 @@ type Grape = {
   notes: string | null;
 };
 
+type Producer = {
+  id: number;
+  name: string;
+  notes: string | null;
+};
+
 type LookupItem = {
   id: number;
   label: string;
@@ -201,25 +207,32 @@ export default function KnowledgePage() {
   const [regions, setRegions] = useState<Region[]>([]);
   const [subregions, setSubregions] = useState<Subregion[]>([]);
   const [grapes, setGrapes] = useState<Grape[]>([]);
+  const [producers, setProducers] = useState<Producer[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
   const loadLookups = useCallback(async () => {
-    const [countryRes, regionRes, subregionRes, grapeRes] = await Promise.all([
+    const [countryRes, regionRes, subregionRes, grapeRes, producerRes] = await Promise.all([
       supabase.from("countries").select("id,name,notes").order("name"),
       supabase.from("regions").select("id,name,country_id,notes,countries(name)").order("name"),
       supabase.from("subregions").select("id,name,region_id,notes,regions(name)").order("name"),
       supabase.from("grapes").select("id,name,notes").order("name"),
+      supabase.from("producers").select("id,name,notes").order("name"),
     ]);
 
-    if (countryRes.error) return alert(countryRes.error.message);
-    if (regionRes.error) return alert(regionRes.error.message);
-    if (subregionRes.error) return alert(subregionRes.error.message);
-    if (grapeRes.error) return alert(grapeRes.error.message);
+    if (countryRes.error) alert(countryRes.error.message);
+    else setCountries((countryRes.data as unknown as Country[]) ?? []);
 
-    setCountries((countryRes.data as unknown as Country[]) ?? []);
-    setRegions((regionRes.data as unknown as Region[]) ?? []);
-    setSubregions((subregionRes.data as unknown as Subregion[]) ?? []);
-    setGrapes((grapeRes.data as unknown as Grape[]) ?? []);
+    if (regionRes.error) alert(regionRes.error.message);
+    else setRegions((regionRes.data as unknown as Region[]) ?? []);
+
+    if (subregionRes.error) alert(subregionRes.error.message);
+    else setSubregions((subregionRes.data as unknown as Subregion[]) ?? []);
+
+    if (grapeRes.error) alert(grapeRes.error.message);
+    else setGrapes((grapeRes.data as unknown as Grape[]) ?? []);
+
+    if (producerRes.error) alert(producerRes.error.message);
+    else setProducers((producerRes.data as unknown as Producer[]) ?? []);
   }, [supabase]);
 
   useEffect(() => {
@@ -395,6 +408,37 @@ export default function KnowledgePage() {
     await loadLookups();
   }
 
+  async function renameProducer(item: { id: number; label: string }) {
+    const nextName = prompt("Rename producer", item.label)?.trim();
+    if (!nextName || nextName === item.label) return;
+    setBusyKey(`producer-rename-${item.id}`);
+    const { error } = await supabase.from("producers").update({ name: nextName }).eq("id", item.id);
+    setBusyKey(null);
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function deleteProducer(item: { id: number; label: string }) {
+    if (!confirm(`Delete producer "${item.label}"? Wines using it will lose the producer.`)) return;
+    setBusyKey(`producer-delete-${item.id}`);
+    {
+      const { error } = await supabase.from("wines").update({ producer_id: null }).eq("producer_id", item.id);
+      if (error) { setBusyKey(null); return alert(error.message); }
+    }
+    const { error } = await supabase.from("producers").delete().eq("id", item.id);
+    setBusyKey(null);
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function saveProducerNote(item: { id: number }, notes: string) {
+    setBusyKey(`producer-note-${item.id}`);
+    const { error } = await supabase.from("producers").update({ notes: notes.trim() || null }).eq("id", item.id);
+    setBusyKey(null);
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
   // ── Derived items ──────────────────────────────────────────────────────────
 
   const countryItems = countries.map((c) => ({ id: c.id, label: c.name, notes: c.notes }));
@@ -411,6 +455,7 @@ export default function KnowledgePage() {
     notes: s.notes,
   }));
   const grapeItems = grapes.map((g) => ({ id: g.id, label: g.name, notes: g.notes }));
+  const producerItems = producers.map((p) => ({ id: p.id, label: p.name, notes: p.notes }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -421,7 +466,7 @@ export default function KnowledgePage() {
           <Eyebrow>Knowledge Base</Eyebrow>
           <PageTitle>My Knowledge</PageTitle>
           <PageIntro>
-            Rename or delete countries, regions, sub-regions, and grape varieties.
+            Rename or delete countries, regions, sub-regions, grape varieties, and producers.
             Changes apply immediately across all your wine records.
           </PageIntro>
         </PageHero>
@@ -466,6 +511,16 @@ export default function KnowledgePage() {
             onDelete={deleteGrape}
             onSaveNote={saveGrapeNote}
           />
+          <div className="lg:col-span-2">
+            <LookupSection
+              title="Producers"
+              emptyText="No producers yet."
+              items={producerItems}
+              onRename={renameProducer}
+              onDelete={deleteProducer}
+              onSaveNote={saveProducerNote}
+            />
+          </div>
         </div>
       </PageContainer>
     </PageShell>

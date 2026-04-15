@@ -114,7 +114,7 @@ export default function SearchableSelect({
       >
         <div className="flex items-center gap-2 px-4 py-3">
           <input
-            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-400"
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-500"
             value={query}
             placeholder={placeholder ?? allLabel}
             disabled={disabled}
