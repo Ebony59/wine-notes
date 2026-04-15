@@ -223,8 +223,8 @@ export default function KnowledgePage() {
   }, [supabase]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) {
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session?.user) {
         location.href = "/";
       } else {
         loadLookups();

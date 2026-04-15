@@ -11,45 +11,7 @@ import {
   PageShell,
   PageTitle,
 } from "@/components/ui/page-shell";
-
-// ── Icons ──────────────────────────────────────────────────────────────────────
-
-function WineGlassIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
-      <path d="M8 3h8l-1.5 6A4 4 0 0 1 8 9H8a4 4 0 0 1-6.5-6L3 3" />
-      <path d="M7 3a5 5 0 0 0 10 0" />
-      <path d="M12 13v8" />
-      <path d="M9 21h6" />
-    </svg>
-  );
-}
-
-function PlusCircleIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
-      <circle cx="12" cy="12" r="9" />
-      <path d="M12 8v8M8 12h8" />
-    </svg>
-  );
-}
-
-function BookOpenIcon() {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-7 w-7">
-      <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-      <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-    </svg>
-  );
-}
-
-function ArrowRightIcon() {
-  return (
-    <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4 transition-transform group-hover:translate-x-0.5">
-      <path d="M4 10h12M11 5l5 5-5 5" />
-    </svg>
-  );
-}
+import { Wine, PlusCircle, BookOpen, ArrowRight } from "lucide-react";
 
 // ── Action card ────────────────────────────────────────────────────────────────
 
@@ -70,7 +32,7 @@ function ActionCard({ href, icon, label, description, primary }: ActionCardProps
       >
         <div className="flex items-start justify-between">
           <span className="rounded-2xl bg-stone-800 p-3 text-stone-300">{icon}</span>
-          <ArrowRightIcon />
+          <ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" />
         </div>
         <div>
           <div className="text-lg font-semibold">{label}</div>
@@ -87,7 +49,7 @@ function ActionCard({ href, icon, label, description, primary }: ActionCardProps
     >
       <div className="flex items-start justify-between">
         <span className="rounded-2xl border border-stone-100 bg-stone-50 p-3 text-stone-600">{icon}</span>
-        <span className="text-stone-400"><ArrowRightIcon /></span>
+        <span className="text-stone-400"><ArrowRight className="h-4 w-4 transition-transform group-hover:translate-x-0.5" /></span>
       </div>
       <div>
         <div className="text-lg font-semibold text-stone-900">{label}</div>
@@ -107,9 +69,9 @@ export default function Home() {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setEmail(data.user?.email ?? null);
+      setEmail(data.session?.user?.email ?? null);
       setAuthLoaded(true);
     });
 
@@ -150,20 +112,20 @@ export default function Home() {
         <div className="mt-10 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <ActionCard
             href="/wines"
-            icon={<WineGlassIcon />}
+            icon={<Wine className="h-7 w-7" />}
             label="My Wines"
             description="Browse your wine tasting notes"
           />
           <ActionCard
             href="/wines/new"
-            icon={<PlusCircleIcon />}
+            icon={<PlusCircle className="h-7 w-7" />}
             label="Add New Wine"
             description="Record a new bottle or capture a fresh tasting note."
             primary
           />
           <ActionCard
             href="/knowledge"
-            icon={<BookOpenIcon />}
+            icon={<BookOpen className="h-7 w-7" />}
             label="My Knowledge"
             description="Manage countries, regions, sub-regions, and grape varieties."
           />

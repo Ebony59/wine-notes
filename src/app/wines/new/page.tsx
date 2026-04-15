@@ -90,8 +90,8 @@ export default function AddWinePage() {
   }, [supabase]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id ?? null;
+    supabase.auth.getSession().then(({ data }) => {
+      const uid = data.session?.user?.id ?? null;
       setUserId(uid);
       if (!uid) location.href = "/";
       else loadExistingWines();

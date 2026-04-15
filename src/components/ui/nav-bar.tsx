@@ -21,9 +21,9 @@ export function NavBar() {
   useEffect(() => {
     let mounted = true;
 
-    supabase.auth.getUser().then(({ data }) => {
+    supabase.auth.getSession().then(({ data }) => {
       if (!mounted) return;
-      setEmail(data.user?.email ?? null);
+      setEmail(data.session?.user?.email ?? null);
       setAuthLoaded(true);
     });
 

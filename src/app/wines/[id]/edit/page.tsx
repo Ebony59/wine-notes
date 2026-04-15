@@ -67,8 +67,8 @@ export default function EditWinePage() {
   const [grapes, setGrapes] = useState<string[]>([]);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) { location.href = "/"; return; }
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session?.user) { location.href = "/"; return; }
       loadWine();
     });
 

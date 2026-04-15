@@ -236,8 +236,8 @@ export default function WinesPage() {
   const searchRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      if (!data.user) location.href = "/";
+    supabase.auth.getSession().then(({ data }) => {
+      if (!data.session?.user) location.href = "/";
       else {
         loadWines();
         loadCountries();

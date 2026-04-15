@@ -181,8 +181,8 @@ export default function WineDetailPage() {
   const [uploading, setUploading] = useState(false);
 
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id ?? null;
+    supabase.auth.getSession().then(({ data }) => {
+      const uid = data.session?.user?.id ?? null;
       if (!uid) { location.href = "/"; return; }
       setUserId(uid);
       loadAll();
