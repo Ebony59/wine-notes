@@ -1,10 +1,16 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
 
 function normalizeField(v: string) {
   const t = v.trim();
@@ -24,12 +30,26 @@ function normalizeVintage(v: string): number | null | typeof NaN {
   return year;
 }
 
+type EditableWine = {
+  name: string | null;
+  vintage_year: number | null;
+  producers: { name: string } | null;
+  countries: { name: string } | null;
+  regions: { name: string } | null;
+  subregions: { name: string } | null;
+};
+
+type EditableGrapeRow = {
+  grapes: { name: string } | null;
+};
+
 export default function EditWinePage() {
   const { id } = useParams<{ id: string }>();
   const supabase = useMemo(() => createClient(), []);
 
   const [loaded, setLoaded] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
 
   const [name, setName] = useState("");
   const [vintage, setVintage] = useState("");
@@ -60,10 +80,11 @@ export default function EditWinePage() {
 
       setName(data.name ?? "");
       setVintage(data.vintage_year?.toString() ?? "");
-      setCountry((data.countries as any)?.name ?? "NA");
-      setRegion((data.regions as any)?.name ?? "NA");
-      setSubregion((data.subregions as any)?.name ?? "NA");
-      setProducer((data.producers as any)?.name ?? "NA");
+      const typed = data as EditableWine;
+      setCountry(typed.countries?.name ?? "NA");
+      setRegion(typed.regions?.name ?? "NA");
+      setSubregion(typed.subregions?.name ?? "NA");
+      setProducer(typed.producers?.name ?? "NA");
 
       const { data: grapeLinks, error: grapeError } = await supabase
         .from("wine_grapes")
@@ -72,8 +93,8 @@ export default function EditWinePage() {
 
       if (grapeError) { alert(grapeError.message); return; }
       setGrapes(normalizeGrapeList(
-        (grapeLinks ?? [])
-          .map((row: any) => row.grapes?.name)
+        ((grapeLinks ?? []) as EditableGrapeRow[])
+          .map((row) => row.grapes?.name)
           .filter((value: string | null | undefined): value is string => Boolean(value))
       ));
       setLoaded(true);
@@ -121,6 +142,21 @@ export default function EditWinePage() {
     return ins.id;
   }
 
+  async function deleteWine() {
+    try {
+      const { error: deleteGrapesError } = await supabase.from("wine_grapes").delete().eq("wine_id", id);
+      if (deleteGrapesError) return alert(deleteGrapesError.message);
+
+      const { error } = await supabase.from("wines").delete().eq("id", id);
+      if (error) return alert(error.message);
+
+      location.href = "/wines";
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to delete.";
+      alert(message);
+    }
+  }
+
   async function save() {
     const wineName = name.trim();
     if (!wineName) return alert("Name is required.");
@@ -163,54 +199,68 @@ export default function EditWinePage() {
       }
 
       location.href = `/wines/${id}`;
-    } catch (e: any) {
-      alert(e?.message ?? "Failed to save.");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Failed to save.";
+      alert(message);
     }
   }
 
   if (notFound) return (
-    <main className="min-h-screen p-4 max-w-xl mx-auto">
-      <p>Wine not found.</p>
-      <a href="/wines" className="text-sm underline">← My wines</a>
-    </main>
+    <PageShell className="py-16">
+      <PageContainer className="max-w-xl">
+        <p>Wine not found.</p>
+        <Link href="/wines" className="text-sm underline">← My wines</Link>
+      </PageContainer>
+    </PageShell>
   );
 
   if (!loaded) return (
-    <main className="min-h-screen p-4 max-w-xl mx-auto">
-      <p className="text-sm text-gray-400">Loading…</p>
-    </main>
+    <PageShell className="py-16">
+      <PageContainer className="max-w-xl">
+        <p className="text-sm text-stone-500">Loading...</p>
+      </PageContainer>
+    </PageShell>
   );
 
   return (
-    <main className="min-h-screen p-4 md:p-6 max-w-xl mx-auto">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Edit wine</h1>
-        <a href={`/wines/${id}`} className="text-sm underline">Cancel</a>
-      </div>
+    <PageShell>
+      <PageContainer className="max-w-3xl">
+        <PageHero className="flex items-start justify-between gap-4">
+          <div>
+            <Eyebrow>Edit Wine</Eyebrow>
+            <PageTitle>Update the bottle details and linked lookups.</PageTitle>
+            <PageIntro>
+              Changes here update the wine record and refresh grape links in one save action.
+            </PageIntro>
+          </div>
+          <Link href={`/wines/${id}`} className="text-sm text-stone-600 underline-offset-4 hover:underline">
+            Cancel
+          </Link>
+        </PageHero>
 
-      <div className="mt-6 rounded-xl border p-4">
-        <div className="grid gap-3">
-          <label className="text-sm">
-            <div className="mb-1 font-medium">Name *</div>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              value={name}
-              onChange={e => setName(e.target.value)}
-            />
-          </label>
+        <Card className="mt-8">
+          <CardTitle>Wine Details</CardTitle>
+          <CardDescription className="mt-2">
+            Keep unknown fields as <strong>NA</strong>. Vintage also accepts <strong>NV</strong>.
+          </CardDescription>
 
-          <label className="text-sm">
-            <div className="mb-1 font-medium">Vintage (year / NV / NA)</div>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="e.g. 2019 or NV"
-              value={vintage}
-              onChange={e => setVintage(e.target.value)}
-            />
-          </label>
+          <div className="mt-6 grid gap-4">
+            <Field>
+              <FieldLabel>Name *</FieldLabel>
+              <Input value={name} onChange={(e) => setName(e.target.value)} />
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Country (or NA)</div>
+            <Field>
+              <FieldLabel>Vintage (year / NV / NA)</FieldLabel>
+              <Input
+                placeholder="e.g. 2019 or NV"
+                value={vintage}
+                onChange={(e) => setVintage(e.target.value)}
+              />
+            </Field>
+
+            <Field>
+              <FieldLabel>Country (or NA)</FieldLabel>
             <AutocompleteInput
               value={country}
               onChange={setCountry}
@@ -220,13 +270,13 @@ export default function EditWinePage() {
                   .select("name")
                   .ilike("name", `%${q}%`)
                   .limit(8);
-                return data?.map(d => d.name) ?? [];
+                return data?.map((d) => d.name) ?? [];
               }}
             />
-          </div>
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Region (or NA)</div>
+            <Field>
+              <FieldLabel>Region (or NA)</FieldLabel>
             <AutocompleteInput
               value={region}
               onChange={setRegion}
@@ -238,13 +288,13 @@ export default function EditWinePage() {
                   if (c?.id) qb = qb.eq("country_id", c.id);
                 }
                 const { data } = await qb.limit(8);
-                return data?.map(d => d.name) ?? [];
+                return data?.map((d) => d.name) ?? [];
               }}
             />
-          </div>
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Sub-region (or NA)</div>
+            <Field>
+              <FieldLabel>Sub-region (or NA)</FieldLabel>
             <AutocompleteInput
               value={subregion}
               onChange={setSubregion}
@@ -262,13 +312,13 @@ export default function EditWinePage() {
                   if (r?.id) qb = qb.eq("region_id", r.id);
                 }
                 const { data } = await qb.limit(8);
-                return data?.map(d => d.name) ?? [];
+                return data?.map((d) => d.name) ?? [];
               }}
             />
-          </div>
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Grapes</div>
+            <Field>
+              <FieldLabel>Grapes</FieldLabel>
             <TagAutocompleteInput
               values={grapes}
               onChange={setGrapes}
@@ -282,10 +332,10 @@ export default function EditWinePage() {
                 return data?.map((d) => d.name) ?? [];
               }}
             />
-          </div>
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Producer (or NA)</div>
+            <Field>
+              <FieldLabel>Producer (or NA)</FieldLabel>
             <AutocompleteInput
               value={producer}
               onChange={setProducer}
@@ -295,19 +345,39 @@ export default function EditWinePage() {
                   .select("name")
                   .ilike("name", `%${q}%`)
                   .limit(8);
-                return data?.map(d => d.name) ?? [];
+                return data?.map((d) => d.name) ?? [];
               }}
             />
-          </div>
+            </Field>
 
-          <button
-            onClick={save}
-            className="mt-2 px-4 py-3 rounded-lg bg-black text-white hover:opacity-90"
+            <div className="pt-2 flex items-center justify-between">
+              <Button onClick={save}>Save Changes</Button>
+              <Button variant="danger" onClick={() => setShowDeleteConfirm(true)}>Delete Wine</Button>
+            </div>
+          </div>
+        </Card>
+      </PageContainer>
+
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 backdrop-blur-sm px-4"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[28px] border border-stone-200 bg-white/95 p-6 shadow-[0_24px_60px_rgba(88,56,34,0.18)]"
+            onClick={(e) => e.stopPropagation()}
           >
-            Save changes
-          </button>
+            <p className="font-serif text-2xl text-stone-900">Delete this wine?</p>
+            <p className="mt-2 text-sm text-stone-600">
+              This will remove this wine entry. Grapes, regions, countries, and other knowledge you've added will remain. This cannot be undone.
+            </p>
+            <div className="mt-6 flex gap-3 justify-end">
+              <Button variant="secondary" onClick={() => setShowDeleteConfirm(false)}>Cancel</Button>
+              <Button variant="danger" onClick={deleteWine}>Yes, delete</Button>
+            </div>
+          </div>
         </div>
-      </div>
-    </main>
+      )}
+    </PageShell>
   );
 }

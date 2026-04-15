@@ -2,6 +2,7 @@
 
 import Fuse from "fuse.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   values: string[];
@@ -47,10 +48,6 @@ export default function MultiSearchableSelect({
 
     return fuse.search(trimmed).map((result) => result.item);
   }, [options, query, values]);
-
-  useEffect(() => {
-    setActiveIndex(-1);
-  }, [filteredOptions]);
 
   function addValue(nextValue: string) {
     if (values.includes(nextValue)) return;
@@ -107,17 +104,17 @@ export default function MultiSearchableSelect({
 
   return (
     <div ref={containerRef} className="relative">
-      <div className="rounded-lg border bg-white shadow-sm">
-        <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+      <div className="rounded-2xl border border-stone-300 bg-stone-50 shadow-sm transition focus-within:border-stone-500 focus-within:bg-white">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-3">
           {values.map((value) => (
             <span
               key={value}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs text-gray-700"
+              className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-700"
             >
               {value}
               <button
                 type="button"
-                className="text-gray-500 hover:text-gray-700"
+                className="text-stone-500 hover:text-stone-700"
                 onClick={() => removeValue(value)}
                 aria-label={`Remove ${value}`}
               >
@@ -127,11 +124,12 @@ export default function MultiSearchableSelect({
           ))}
 
           <input
-            className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+            className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-400"
             value={query}
             placeholder={values.length === 0 ? placeholder : undefined}
             onChange={(e) => {
               setQuery(e.target.value);
+              setActiveIndex(-1);
               setOpen(true);
             }}
             onFocus={() => setOpen(true)}
@@ -141,7 +139,7 @@ export default function MultiSearchableSelect({
 
           <button
             type="button"
-            className="flex h-4 w-4 items-center justify-center text-gray-400"
+            className="flex h-4 w-4 items-center justify-center text-stone-400"
             onMouseDown={(e) => e.preventDefault()}
             onClick={toggleOpen}
             aria-label={open ? "Close dropdown" : "Open dropdown"}
@@ -165,11 +163,11 @@ export default function MultiSearchableSelect({
       </div>
 
       {open && (
-        <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+        <ul className="absolute z-20 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           <li>
             <button
               type="button"
-              className="w-full px-3 py-2 text-left text-sm hover:bg-gray-50"
+              className="w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition hover:bg-stone-50"
               onMouseDown={(e) => {
                 e.preventDefault();
                 clearAll();
@@ -183,9 +181,10 @@ export default function MultiSearchableSelect({
             <li key={option}>
               <button
                 type="button"
-                className={`w-full px-3 py-2 text-left text-sm ${
-                  index === activeIndex ? "bg-gray-100" : "hover:bg-gray-50"
-                }`}
+                className={cn(
+                  "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition",
+                  index === activeIndex ? "bg-stone-100 text-stone-900" : "hover:bg-stone-50"
+                )}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   addValue(option);

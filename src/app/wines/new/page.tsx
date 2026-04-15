@@ -1,10 +1,26 @@
 "use client";
 
+import Link from "next/link";
 import Fuse from "fuse.js";
-import { useMemo, useState, useEffect } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Field, FieldHint, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
+import {
+  Eyebrow,
+  PageContainer,
+  PageHero,
+  PageIntro,
+  PageShell,
+  PageTitle,
+  PageTopBar,
+  PageTopNav,
+} from "@/components/ui/page-shell";
+import { Textarea } from "@/components/ui/textarea";
 
 function normalizeField(v: string) {
   const t = v.trim();
@@ -13,14 +29,14 @@ function normalizeField(v: string) {
   return t;
 }
 
-function normalizeVintage(v: string): number | null {
+function normalizeVintage(v: string): number | null | typeof Number.NaN {
   const t = v.trim();
   if (!t) return null;
   if (t.toUpperCase() === "NV") return null;
   if (t.toUpperCase() === "NA") return null;
 
   const year = Number(t);
-  if (!Number.isInteger(year) || year < 1800 || year > 2100) return NaN as any;
+  if (!Number.isInteger(year) || year < 1800 || year > 2100) return Number.NaN;
   return year;
 }
 
@@ -57,16 +73,7 @@ export default function AddWinePage() {
   const [nameSearch, setNameSearch] = useState("");
   const [nameOpen, setNameOpen] = useState(false);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const uid = data.user?.id ?? null;
-      setUserId(uid);
-      if (!uid) location.href = "/";
-      else loadExistingWines();
-    });
-  }, [supabase]);
-
-  async function loadExistingWines() {
+  const loadExistingWines = useCallback(async () => {
     const { data, error } = await supabase
       .from("wines")
       .select(`
@@ -83,7 +90,16 @@ export default function AddWinePage() {
     }
 
     setExistingWines((data as ExistingWine[]) ?? []);
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const uid = data.user?.id ?? null;
+      setUserId(uid);
+      if (!uid) location.href = "/";
+      else loadExistingWines();
+    });
+  }, [supabase, loadExistingWines]);
 
   const wineNameFuse = useMemo(
     () =>
@@ -276,6 +292,52 @@ export default function AddWinePage() {
         producer_id = await ensureProducerId(producerName);
       }
 
+      // Check for an existing wine with identical details before creating a new one
+      let dupQuery = supabase.from("wines").select("id").eq("name", wineName);
+      if (vintageYear === null || vintageYear === undefined) {
+        dupQuery = dupQuery.is("vintage_year", null);
+      } else {
+        dupQuery = dupQuery.eq("vintage_year", vintageYear as number);
+      }
+      if (country_id === null) {
+        dupQuery = dupQuery.is("country_id", null);
+      } else {
+        dupQuery = dupQuery.eq("country_id", country_id);
+      }
+      if (region_id === null) {
+        dupQuery = dupQuery.is("region_id", null);
+      } else {
+        dupQuery = dupQuery.eq("region_id", region_id);
+      }
+      if (subregion_id === null) {
+        dupQuery = dupQuery.is("subregion_id", null);
+      } else {
+        dupQuery = dupQuery.eq("subregion_id", subregion_id);
+      }
+      if (producer_id === null) {
+        dupQuery = dupQuery.is("producer_id", null);
+      } else {
+        dupQuery = dupQuery.eq("producer_id", producer_id);
+      }
+
+      const { data: existingMatch, error: dupError } = await dupQuery.maybeSingle();
+      if (dupError) return alert(dupError.message);
+
+      if (existingMatch) {
+        // Wine already exists — add the tasting note to it and redirect
+        if (notes.trim() || tastedOn) {
+          const { error: tastingError } = await supabase.from("wine_tastings").insert({
+            wine_id: existingMatch.id,
+            tasted_on: tastedOn || null,
+            notes: notes.trim() || null,
+          });
+          if (tastingError) return alert(tastingError.message);
+        }
+        location.href = `/wines/${existingMatch.id}`;
+        return;
+      }
+
+      // No match — create a new wine entry
       const { data: newWine, error } = await supabase.from("wines").insert({
         user_id: userId,
         name: wineName,
@@ -306,213 +368,220 @@ export default function AddWinePage() {
       }
 
       location.href = `/wines/${newWine.id}`;
-    } catch (e: any) {
-      console.error(e);
-      alert(e?.message ?? "Failed to save wine.");
+    } catch (error) {
+      console.error(error);
+      const message = error instanceof Error ? error.message : "Failed to save wine.";
+      alert(message);
     }
   }
 
   return (
-    <main className="min-h-screen p-4 md:p-6 max-w-xl mx-auto">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">Add new wine</h1>
-        <a href="/wines" className="text-sm underline">
-          My wines
-        </a>
-      </div>
+    <PageShell>
+      <PageContainer className="max-w-2xl">
+        <PageTopBar>
+          <Eyebrow className="pt-1">Add Wine</Eyebrow>
+          <PageTopNav>
+            <Button asChild variant="ghost" className="min-h-11 w-full rounded-2xl px-4 sm:w-auto">
+              <Link href="/wines">My wines</Link>
+            </Button>
+          </PageTopNav>
+        </PageTopBar>
 
-      <div className="mt-6 rounded-xl border p-4">
-        <div className="grid gap-3">
-          <label className="text-sm">
-            <div className="mb-1 font-medium">Name *</div>
-            <div className="relative" data-wine-name-picker>
-              <input
-                className="border rounded px-3 py-2 w-full"
-                placeholder="e.g. Chateau Lafite"
-                value={nameSearch}
-                onChange={(e) => {
-                  const nextValue = e.target.value;
-                  setNameSearch(nextValue);
-                  setName(nextValue);
-                  setNameOpen(true);
-                }}
-                onFocus={() => nameSearch.trim() && setNameOpen(true)}
-                onKeyDown={(e) => e.key === "Escape" && setNameOpen(false)}
-                autoComplete="off"
+        <PageHero>
+          <PageTitle>Add a bottle and optionally capture the first tasting note.</PageTitle>
+          <PageIntro>
+            Start with the wine details. Lookup values can be reused from existing data or created as you save.
+          </PageIntro>
+        </PageHero>
+
+        <Card className="mt-8">
+          <CardTitle>Wine Details</CardTitle>
+          <CardDescription className="mt-2">
+            Use <strong>NA</strong> for unknown location or producer fields. Vintage also accepts <strong>NV</strong>.
+          </CardDescription>
+
+          <div className="mt-6 grid gap-4">
+            <Field>
+              <FieldLabel>Name *</FieldLabel>
+              <div className="relative" data-wine-name-picker>
+                <Input
+                  placeholder="e.g. Chateau Lafite"
+                  value={nameSearch}
+                  onChange={(e) => {
+                    const nextValue = e.target.value;
+                    setNameSearch(nextValue);
+                    setName(nextValue);
+                    setNameOpen(true);
+                  }}
+                  onFocus={() => nameSearch.trim() && setNameOpen(true)}
+                  onKeyDown={(e) => e.key === "Escape" && setNameOpen(false)}
+                  autoComplete="off"
+                />
+
+                {nameOpen && wineNameSuggestions.length > 0 && (
+                  <ul className="absolute top-full z-20 mt-2 max-h-64 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
+                    {wineNameSuggestions.map((wine) => (
+                      <li key={wine.id}>
+                        <button
+                          type="button"
+                          className="w-full rounded-xl px-3 py-2 text-left transition hover:bg-stone-50"
+                          onMouseDown={(e) => {
+                            e.preventDefault();
+                            applyExistingWine(wine);
+                          }}
+                        >
+                          <div className="flex items-baseline justify-between gap-3">
+                            <span className="text-sm font-medium text-stone-900">{wine.name}</span>
+                            <span className="text-xs text-stone-500">{formatVintage(wine.vintage_year)}</span>
+                          </div>
+                          <div className="mt-0.5 text-xs text-stone-500">
+                            {[wine.producers?.name, wine.countries?.name, wine.regions?.name, wine.subregions?.name]
+                              .filter(Boolean)
+                              .join(" · ")}
+                          </div>
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            </Field>
+
+            <Field>
+              <FieldLabel>Vintage (year / NV / NA)</FieldLabel>
+              <Input
+                placeholder="e.g. 2019 or NV"
+                value={vintage}
+                onChange={(e) => setVintage(e.target.value)}
               />
+            </Field>
 
-              {nameOpen && wineNameSuggestions.length > 0 && (
-                <ul className="absolute z-20 top-full mt-1 w-full overflow-auto rounded-lg border bg-white shadow-lg max-h-64">
-                  {wineNameSuggestions.map((wine) => (
-                    <li key={wine.id}>
-                      <button
-                        type="button"
-                        className="w-full px-3 py-2 text-left hover:bg-gray-50"
-                        onMouseDown={(e) => {
-                          e.preventDefault();
-                          applyExistingWine(wine);
-                        }}
-                      >
-                        <div className="flex items-baseline justify-between gap-3">
-                          <span className="text-sm font-medium">{wine.name}</span>
-                          <span className="text-xs text-gray-500">{formatVintage(wine.vintage_year)}</span>
-                        </div>
-                        <div className="text-xs text-gray-400 mt-0.5">
-                          {[wine.producers?.name, wine.countries?.name, wine.regions?.name, wine.subregions?.name]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </div>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-          </label>
+            <Field>
+              <FieldLabel>Country (or NA)</FieldLabel>
+              <AutocompleteInput
+                value={country}
+                onChange={setCountry}
+                placeholder="e.g. France"
+                fetchSuggestions={async (q) => {
+                  const { data } = await supabase
+                    .from("countries")
+                    .select("name")
+                    .ilike("name", `%${q}%`)
+                    .limit(8);
+                  return data?.map((d) => d.name) ?? [];
+                }}
+              />
+            </Field>
 
-          <label className="text-sm">
-            <div className="mb-1 font-medium">Vintage (year / NV / NA)</div>
-            <input
-              className="border rounded px-3 py-2 w-full"
-              placeholder="e.g. 2019 or NV"
-              value={vintage}
-              onChange={(e) => setVintage(e.target.value)}
-            />
-          </label>
-
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Country (or NA)</div>
-            <AutocompleteInput
-              value={country}
-              onChange={setCountry}
-              placeholder="e.g. France"
-              fetchSuggestions={async (q) => {
-                const { data } = await supabase
-                  .from("countries")
-                  .select("name")
-                  .ilike("name", `%${q}%`)
-                  .limit(8);
-                return data?.map(d => d.name) ?? [];
-              }}
-            />
-          </div>
-
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Region (or NA)</div>
-            <AutocompleteInput
-              value={region}
-              onChange={setRegion}
-              placeholder="e.g. Burgundy"
-              fetchSuggestions={async (q) => {
-                const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
-                let qb = supabase.from("regions").select("name").ilike("name", `%${q}%`);
-                if (countryName) {
-                  const { data: c } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
-                  if (c?.id) qb = qb.eq("country_id", c.id);
-                }
-                const { data } = await qb.limit(8);
-                return data?.map(d => d.name) ?? [];
-              }}
-            />
-          </div>
-
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Sub-region (or NA)</div>
-            <AutocompleteInput
-              value={subregion}
-              onChange={setSubregion}
-              placeholder="e.g. Côte de Nuits"
-              fetchSuggestions={async (q) => {
-                const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
-                let qb = supabase.from("subregions").select("name").ilike("name", `%${q}%`);
-                if (regionName) {
+            <Field>
+              <FieldLabel>Region (or NA)</FieldLabel>
+              <AutocompleteInput
+                value={region}
+                onChange={setRegion}
+                placeholder="e.g. Burgundy"
+                fetchSuggestions={async (q) => {
                   const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
-                  let rqb = supabase.from("regions").select("id").eq("name", regionName);
+                  let qb = supabase.from("regions").select("name").ilike("name", `%${q}%`);
                   if (countryName) {
                     const { data: c } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
-                    if (c?.id) rqb = rqb.eq("country_id", c.id);
+                    if (c?.id) qb = qb.eq("country_id", c.id);
                   }
-                  const { data: r } = await rqb.maybeSingle();
-                  if (r?.id) qb = qb.eq("region_id", r.id);
-                }
-                const { data } = await qb.limit(8);
-                return data?.map(d => d.name) ?? [];
-              }}
-            />
-          </div>
+                  const { data } = await qb.limit(8);
+                  return data?.map((d) => d.name) ?? [];
+                }}
+              />
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Grapes</div>
-            <TagAutocompleteInput
-              values={grapes}
-              onChange={setGrapes}
-              placeholder="e.g. Cabernet Sauvignon"
-              fetchSuggestions={async (q) => {
-                const { data } = await supabase
-                  .from("grapes")
-                  .select("name")
-                  .ilike("name", `%${q}%`)
-                  .limit(8);
-                return data?.map((d) => d.name) ?? [];
-              }}
-            />
-          </div>
+            <Field>
+              <FieldLabel>Sub-region (or NA)</FieldLabel>
+              <AutocompleteInput
+                value={subregion}
+                onChange={setSubregion}
+                placeholder="e.g. Côte de Nuits"
+                fetchSuggestions={async (q) => {
+                  const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
+                  let qb = supabase.from("subregions").select("name").ilike("name", `%${q}%`);
+                  if (regionName) {
+                    const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
+                    let rqb = supabase.from("regions").select("id").eq("name", regionName);
+                    if (countryName) {
+                      const { data: c } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
+                      if (c?.id) rqb = rqb.eq("country_id", c.id);
+                    }
+                    const { data: r } = await rqb.maybeSingle();
+                    if (r?.id) qb = qb.eq("region_id", r.id);
+                  }
+                  const { data } = await qb.limit(8);
+                  return data?.map((d) => d.name) ?? [];
+                }}
+              />
+            </Field>
 
-          <div className="text-sm">
-            <div className="mb-1 font-medium">Producer (or NA)</div>
-            <AutocompleteInput
-              value={producer}
-              onChange={setProducer}
-              placeholder="e.g. Domaine de la Romanée-Conti"
-              fetchSuggestions={async (q) => {
-                const { data } = await supabase
-                  .from("producers")
-                  .select("name")
-                  .ilike("name", `%${q}%`)
-                  .limit(8);
-                return data?.map(d => d.name) ?? [];
-              }}
-            />
-          </div>
+            <Field>
+              <FieldLabel>Grapes</FieldLabel>
+              <TagAutocompleteInput
+                values={grapes}
+                onChange={setGrapes}
+                placeholder="e.g. Cabernet Sauvignon"
+                fetchSuggestions={async (q) => {
+                  const { data } = await supabase
+                    .from("grapes")
+                    .select("name")
+                    .ilike("name", `%${q}%`)
+                    .limit(8);
+                  return data?.map((d) => d.name) ?? [];
+                }}
+              />
+            </Field>
 
-          <div className="border-t pt-3 mt-1">
-            <div className="text-sm font-medium mb-2">First tasting note <span className="text-gray-400 font-normal">(optional)</span></div>
+            <Field>
+              <FieldLabel>Producer (or NA)</FieldLabel>
+              <AutocompleteInput
+                value={producer}
+                onChange={setProducer}
+                placeholder="e.g. Domaine de la Romanée-Conti"
+                fetchSuggestions={async (q) => {
+                  const { data } = await supabase
+                    .from("producers")
+                    .select("name")
+                    .ilike("name", `%${q}%`)
+                    .limit(8);
+                  return data?.map((d) => d.name) ?? [];
+                }}
+              />
+            </Field>
 
-            <div className="grid gap-3">
-              <label className="text-sm">
-                <div className="mb-1 font-medium">Date tasted</div>
-                <input
-                  type="date"
-                  className="border rounded px-3 py-2 w-full"
-                  value={tastedOn}
-                  onChange={(e) => setTastedOn(e.target.value)}
-                />
-              </label>
+            <div className="border-t border-stone-200 pt-5">
+              <CardTitle className="text-xl">First Tasting Note</CardTitle>
+              <CardDescription className="mt-2">Optional, but useful if you are entering a bottle after tasting it.</CardDescription>
 
-              <label className="text-sm">
-                <div className="mb-1 font-medium">Notes</div>
-                <textarea
-                  className="border rounded px-3 py-2 w-full min-h-[140px]"
-                  placeholder="What did you taste/smell? Structure? Pairing? Thoughts..."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                />
-              </label>
+              <div className="mt-4 grid gap-4">
+                <Field>
+                  <FieldLabel>Date tasted</FieldLabel>
+                  <Input type="date" value={tastedOn} onChange={(e) => setTastedOn(e.target.value)} />
+                </Field>
+
+                <Field>
+                  <FieldLabel>Notes</FieldLabel>
+                  <Textarea
+                    className="min-h-[140px]"
+                    placeholder="What did you taste, smell, pair it with, or want to remember?"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-3 pt-2">
+              <Button onClick={saveWine}>Save Wine</Button>
+              <FieldHint className="mt-0">
+                Tip: You can add more tasting notes and photos after saving.
+              </FieldHint>
             </div>
           </div>
-
-          <button
-            onClick={saveWine}
-            className="mt-2 px-4 py-3 rounded-lg bg-black text-white hover:opacity-90"
-          >
-            Save
-          </button>
-
-          <div className="text-xs text-gray-500">
-            Tip: Type <b>NA</b> for unknown fields. Vintage accepts <b>NV</b>. You can add more tasting notes and photos after saving.
-          </div>
-        </div>
-      </div>
-    </main>
+        </Card>
+      </PageContainer>
+    </PageShell>
   );
 }

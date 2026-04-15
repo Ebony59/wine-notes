@@ -2,6 +2,7 @@
 
 import Fuse from "fuse.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   value: string;
@@ -105,10 +106,15 @@ export default function SearchableSelect({
 
   return (
     <div ref={containerRef} className="relative">
-      <div className={`rounded-lg border bg-white shadow-sm ${disabled ? "opacity-50" : ""}`}>
-        <div className="flex items-center gap-2 px-3 py-2">
+      <div
+        className={cn(
+          "rounded-2xl border border-stone-300 bg-stone-50 shadow-sm transition focus-within:border-stone-500 focus-within:bg-white",
+          disabled && "opacity-50"
+        )}
+      >
+        <div className="flex items-center gap-2 px-4 py-3">
           <input
-            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm outline-none"
+            className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-400"
             value={query}
             placeholder={placeholder ?? allLabel}
             disabled={disabled}
@@ -123,7 +129,7 @@ export default function SearchableSelect({
           />
           <button
             type="button"
-            className="flex h-4 w-4 items-center justify-center text-gray-400"
+            className="flex h-4 w-4 items-center justify-center text-stone-400"
             onMouseDown={(e) => e.preventDefault()}
             onClick={toggleOpen}
             aria-label={open ? "Close dropdown" : "Open dropdown"}
@@ -148,13 +154,16 @@ export default function SearchableSelect({
       </div>
 
       {open && !disabled && (
-        <ul className="absolute z-20 mt-1 max-h-52 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+        <ul className="absolute z-20 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           <li>
             <button
               type="button"
-              className={`w-full px-3 py-2 text-left text-sm ${
-                activeIndex === -1 && query.trim() === "" ? "bg-gray-100" : "hover:bg-gray-50"
-              }`}
+              className={cn(
+                "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition",
+                activeIndex === -1 && query.trim() === ""
+                  ? "bg-stone-100 text-stone-900"
+                  : "hover:bg-stone-50"
+              )}
               onMouseDown={(e) => {
                 e.preventDefault();
                 clear();
@@ -168,9 +177,10 @@ export default function SearchableSelect({
             <li key={option}>
               <button
                 type="button"
-                className={`w-full px-3 py-2 text-left text-sm ${
-                  index === activeIndex ? "bg-gray-100" : "hover:bg-gray-50"
-                }`}
+                className={cn(
+                  "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition",
+                  index === activeIndex ? "bg-stone-100 text-stone-900" : "hover:bg-stone-50"
+                )}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   select(option);

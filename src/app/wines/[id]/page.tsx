@@ -1,10 +1,19 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
+import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
 
 type DetectedImageFormat = "heic" | "jpeg" | "png" | "gif" | "webp" | "unknown";
+type HeicConverter = (options: { blob: Blob; type: string; quality: number }) => Promise<Blob | Blob[]>;
+type HeicModule = { heicTo?: HeicConverter; default?: HeicConverter };
 
 async function detectImageFormat(file: File): Promise<DetectedImageFormat> {
   const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
@@ -70,12 +79,12 @@ async function convertIfNeeded(file: File): Promise<File> {
   }
 
   // Stage 2: heic-to ships a newer libheif build than heic2any.
-  const mod = await import("heic-to");
+  const mod = (await import("heic-to")) as HeicModule;
   const converter =
-    typeof (mod as any).heicTo === "function"
-      ? (mod as any).heicTo
-      : typeof (mod as any).default === "function"
-        ? (mod as any).default
+    typeof mod.heicTo === "function"
+      ? mod.heicTo
+      : typeof mod.default === "function"
+        ? mod.default
         : null;
   if (!converter) {
     throw new Error("HEIC converter failed to load");
@@ -299,12 +308,13 @@ export default function WineDetailPage() {
     let file: File;
     try {
       file = await convertIfNeeded(rawFile);
-    } catch (err: any) {
+    } catch (error) {
       setUploading(false);
-      alert(`Could not convert this HEIC image: ${err?.message ?? "unknown error"}. Some newer HEIC variants are not decoded by the current browser converter yet.`);
+      const message = error instanceof Error ? error.message : "unknown error";
+      alert(`Could not convert this HEIC image: ${message}. Some newer HEIC variants are not decoded by the current browser converter yet.`);
       return;
     }
-    const path = `${userId}/${id}/${Date.now()}_${file.name}`;
+    const path = `${userId}/${id}/${rawFile.lastModified}_${file.name}`;
     const { error: upErr } = await supabase.storage.from("wine-photos").upload(path, file);
     if (upErr) { alert(upErr.message); setUploading(false); return; }
     const tastingId = target === "general" ? null : target;
@@ -359,7 +369,7 @@ export default function WineDetailPage() {
 
   // ── Render helpers ───────────────────────────────────────────────────────────
 
-  function PhotoAddForm({ target }: { target: string }) {
+  function renderPhotoAddForm(target: string) {
     return (
       <div
         className="mt-2 p-3 bg-gray-50 rounded-lg border space-y-2"
@@ -433,16 +443,20 @@ export default function WineDetailPage() {
   // ── Early returns ────────────────────────────────────────────────────────────
 
   if (notFound) return (
-    <main className="min-h-screen p-4 max-w-xl mx-auto">
-      <p className="text-gray-600">Wine not found.</p>
-      <a href="/wines" className="mt-2 inline-block text-sm underline">← My wines</a>
-    </main>
+    <PageShell className="py-16">
+      <PageContainer className="max-w-3xl">
+        <p className="text-stone-600">Wine not found.</p>
+        <Link href="/wines" className="mt-2 inline-block text-sm underline">← My wines</Link>
+      </PageContainer>
+    </PageShell>
   );
 
   if (!wine) return (
-    <main className="min-h-screen p-4 max-w-xl mx-auto">
-      <p className="text-sm text-gray-400">Loading…</p>
-    </main>
+    <PageShell className="py-16">
+      <PageContainer className="max-w-3xl">
+        <p className="text-sm text-stone-500">Loading...</p>
+      </PageContainer>
+    </PageShell>
   );
 
   const generalPhotos = photos.filter(p => p.tasting_id === null);
@@ -450,88 +464,93 @@ export default function WineDetailPage() {
     .filter(Boolean).join(" · ");
 
   return (
-    <main className="min-h-screen p-4 md:p-6 max-w-xl mx-auto pb-16">
+    <PageShell>
+      <PageContainer className="max-w-4xl pb-16">
+        <PageHero className="flex flex-col gap-5 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <Eyebrow>Wine Detail</Eyebrow>
+            <PageTitle>{wine.name}</PageTitle>
+            <PageIntro>
+              {meta || "Bottle detail, tasting history, photos, and similar wines."}
+            </PageIntro>
+          </div>
+          <div className="flex items-center gap-3">
+            <Link href="/wines" className="text-sm text-stone-600 underline-offset-4 hover:underline">← My wines</Link>
+            <Button variant="secondary" asChild>
+              <Link href={`/wines/${id}/edit`}>Edit Wine</Link>
+            </Button>
+          </div>
+        </PageHero>
 
-      {/* Nav */}
-      <div className="flex items-center justify-between gap-3">
-        <a href="/wines" className="text-sm underline">← My wines</a>
-        <a href={`/wines/${id}/edit`} className="px-3 py-1.5 rounded border text-sm hover:bg-gray-50">
-          Edit wine
-        </a>
-      </div>
-
-      {/* Cover photo */}
-      {wine.cover_photo_url && (
-        <div className="mt-4 rounded-xl overflow-hidden aspect-video bg-gray-100">
-          <img src={wine.cover_photo_url} alt={wine.name} className="w-full h-full object-cover" />
-        </div>
-      )}
-
-      {/* Title */}
-      <div className="mt-4">
-        <h1 className="text-2xl font-semibold">
-          {wine.name}
-          <span className="ml-2 text-lg text-gray-500 font-normal">{wine.vintage_year ?? "NV"}</span>
-        </h1>
-        {meta && <p className="text-sm text-gray-500 mt-0.5">{meta}</p>}
-        {grapes.length > 0 && (
-          <p className="mt-2 text-sm text-gray-700">
-            <span className="font-medium">Grapes:</span>{" "}
-            {grapes.join(", ")}
-          </p>
+        {wine.cover_photo_url && (
+          <div className="mt-8 overflow-hidden rounded-[28px] border border-stone-200 bg-stone-100 aspect-video">
+            <img src={wine.cover_photo_url} alt={wine.name} className="h-full w-full object-cover" />
+          </div>
         )}
-      </div>
 
-      {/* ── Tasting Notes ── */}
-      <section className="mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="font-semibold text-lg">Tasting Notes</h2>
+        <Card className="mt-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div>
+              <CardTitle className="flex items-center gap-3">
+                <span>{wine.name}</span>
+                <span className="text-xl font-normal text-stone-500">{wine.vintage_year ?? "NV"}</span>
+              </CardTitle>
+              {meta && <CardDescription className="mt-2">{meta}</CardDescription>}
+            </div>
+            {grapes.length > 0 ? <Badge>{grapes.join(", ")}</Badge> : null}
+          </div>
+        </Card>
+
+        <Card className="mt-6">
+          <div className="mb-3 flex items-center justify-between">
+            <div>
+              <CardTitle className="text-2xl">Tasting Notes</CardTitle>
+              <CardDescription className="mt-2">
+                Keep structured notes over time for the same bottle or label.
+              </CardDescription>
+            </div>
           {!showAdd && (
-            <button
-              onClick={() => setShowAdd(true)}
-              className="px-3 py-1.5 text-sm rounded-lg bg-black text-white hover:opacity-90"
-            >
+              <Button onClick={() => setShowAdd(true)}>
               + Add
-            </button>
+              </Button>
           )}
-        </div>
+          </div>
 
         {showAdd && (
-          <div className="rounded-xl border p-3 mb-3 bg-gray-50 space-y-2">
+            <div className="mb-3 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-4">
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Date tasted</label>
-              <input
+                <label className="mb-1 block text-xs font-medium text-stone-500">Date tasted</label>
+                <Input
                 type="date"
-                className="border rounded px-2 py-1.5 text-sm w-full"
                 value={addDate}
-                onChange={e => setAddDate(e.target.value)}
+                  onChange={(e) => setAddDate(e.target.value)}
               />
             </div>
             <div>
-              <label className="text-xs font-medium text-gray-500 mb-1 block">Notes</label>
-              <textarea
-                className="border rounded px-2 py-1.5 text-sm w-full min-h-[120px]"
+                <label className="mb-1 block text-xs font-medium text-stone-500">Notes</label>
+                <Textarea
+                  className="min-h-[120px]"
                 placeholder="What did you taste, smell, feel…"
                 value={addNotes}
-                onChange={e => setAddNotes(e.target.value)}
+                  onChange={(e) => setAddNotes(e.target.value)}
               />
             </div>
             <div className="flex gap-2">
-              <button onClick={saveTasting} className="px-3 py-1.5 text-sm rounded bg-black text-white">
+                <Button onClick={saveTasting}>
                 Save
-              </button>
-              <button
+                </Button>
+                <Button
+                  variant="secondary"
                 onClick={() => { setShowAdd(false); setAddDate(""); setAddNotes(""); }}
-                className="px-3 py-1.5 text-sm rounded border"
               >
                 Cancel
-              </button>
+                </Button>
             </div>
           </div>
         )}
 
         {tastings.length === 0 && !showAdd && (
-          <p className="text-sm text-gray-400">No tasting notes yet.</p>
+            <p className="text-sm text-stone-500">No tasting notes yet.</p>
         )}
 
         <div className="space-y-3">
@@ -541,35 +560,34 @@ export default function WineDetailPage() {
             const isAddingPhoto = photoTarget === t.id;
 
             return (
-              <div key={t.id} className="rounded-xl border p-4">
+                <div key={t.id} className="rounded-2xl border border-stone-200 bg-white/80 p-4">
                 {isEditing ? (
                   <div className="space-y-2">
-                    <input
+                      <Input
                       type="date"
-                      className="border rounded px-2 py-1.5 text-sm w-full"
                       value={editDate}
-                      onChange={e => setEditDate(e.target.value)}
+                        onChange={(e) => setEditDate(e.target.value)}
                     />
-                    <textarea
-                      className="border rounded px-2 py-1.5 text-sm w-full min-h-[120px]"
+                      <Textarea
+                        className="min-h-[120px]"
                       value={editNotes}
-                      onChange={e => setEditNotes(e.target.value)}
+                        onChange={(e) => setEditNotes(e.target.value)}
                     />
                     <div className="flex gap-2">
-                      <button onClick={saveEdit} className="px-3 py-1.5 text-sm rounded bg-black text-white">
+                        <Button onClick={saveEdit}>
                         Save
-                      </button>
-                      <button onClick={() => setEditId(null)} className="px-3 py-1.5 text-sm rounded border">
+                        </Button>
+                        <Button variant="secondary" onClick={() => setEditId(null)}>
                         Cancel
-                      </button>
+                        </Button>
                     </div>
                   </div>
                 ) : (
                   <>
-                    <div className="text-xs font-medium text-gray-500 mb-2">{fmtDate(t.tasted_on)}</div>
+                      <div className="mb-2 text-xs font-medium text-stone-500">{fmtDate(t.tasted_on)}</div>
 
                     {t.notes && (
-                      <p className="text-sm whitespace-pre-wrap leading-relaxed">{t.notes}</p>
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-stone-800">{t.notes}</p>
                     )}
 
                     {tastingPhotos.length > 0 && (
@@ -578,23 +596,23 @@ export default function WineDetailPage() {
                       </div>
                     )}
 
-                    {isAddingPhoto && <PhotoAddForm target={t.id} />}
+                    {isAddingPhoto && renderPhotoAddForm(t.id)}
 
                     <div className="mt-3 flex items-center gap-3">
                       {!isAddingPhoto && (
                         <button
                           onClick={() => { setPhotoTarget(t.id); setPhotoUrl(""); }}
-                          className="text-xs text-gray-500 underline"
+                            className="text-xs text-stone-500 underline"
                         >
                           + Photo
                         </button>
                       )}
-                      <button onClick={() => beginEdit(t)} className="text-xs text-gray-500 underline">
+                        <button onClick={() => beginEdit(t)} className="text-xs text-stone-500 underline">
                         Edit
                       </button>
                       <button
                         onClick={() => deleteTasting(t.id)}
-                        className="text-xs text-red-400 underline ml-auto"
+                          className="ml-auto text-xs text-rose-500 underline"
                       >
                         Delete
                       </button>
@@ -605,26 +623,25 @@ export default function WineDetailPage() {
             );
           })}
         </div>
-      </section>
+        </Card>
 
-      {/* ── General Photos ── */}
-      <section className="mt-8">
-        <div className="flex items-center justify-between mb-3">
+        <Card className="mt-8">
+          <div className="mb-3 flex items-center justify-between">
           <div>
-            <h2 className="font-semibold text-lg">Photos</h2>
-            <p className="text-xs text-gray-500">Not tied to a specific tasting</p>
+              <CardTitle className="text-2xl">Photos</CardTitle>
+              <CardDescription className="mt-2">Not tied to a specific tasting.</CardDescription>
           </div>
           {photoTarget !== "general" && (
-            <button
+              <Button
+                variant="secondary"
               onClick={() => { setPhotoTarget("general"); setPhotoUrl(""); }}
-              className="px-3 py-1.5 text-sm rounded-lg border hover:bg-gray-50"
             >
               + Add photo
-            </button>
+              </Button>
           )}
-        </div>
+          </div>
 
-        {photoTarget === "general" && <PhotoAddForm target="general" />}
+        {photoTarget === "general" && renderPhotoAddForm("general")}
 
         {generalPhotos.length > 0 ? (
           <div className="mt-3 flex flex-wrap gap-2">
@@ -632,30 +649,30 @@ export default function WineDetailPage() {
           </div>
         ) : (
           photoTarget !== "general" && (
-            <p className="text-sm text-gray-400">No general photos yet.</p>
+              <p className="text-sm text-stone-500">No general photos yet.</p>
           )
         )}
-      </section>
+        </Card>
 
-      {/* ── Similar Wines ── */}
       {similar.length > 0 && (
-        <section className="mt-8">
-          <h2 className="font-semibold text-lg mb-1">Similar Wines</h2>
-          <p className="text-xs text-gray-500 mb-3">Same producer / sub-region / vintage</p>
-          <div className="space-y-2">
+          <Card className="mt-8">
+            <CardTitle className="text-2xl">Similar Wines</CardTitle>
+            <CardDescription className="mt-2">Same producer, sub-region, or vintage.</CardDescription>
+            <div className="mt-4 space-y-2">
             {similar.map(w => (
-              <a
+                <Link
                 key={w.id}
                 href={`/wines/${w.id}`}
-                className="flex items-baseline justify-between gap-3 rounded-xl border px-3 py-2 hover:bg-gray-50"
+                  className="flex items-baseline justify-between gap-3 rounded-xl border border-stone-200 bg-white px-3 py-2 transition hover:bg-stone-50"
               >
-                <span className="font-medium text-sm">{w.name}</span>
-                <span className="text-sm text-gray-500 flex-shrink-0">{w.vintage_year ?? "NV"}</span>
-              </a>
+                  <span className="text-sm font-medium text-stone-900">{w.name}</span>
+                  <span className="shrink-0 text-sm text-stone-500">{w.vintage_year ?? "NV"}</span>
+                </Link>
             ))}
-          </div>
-        </section>
+            </div>
+          </Card>
       )}
-    </main>
+      </PageContainer>
+    </PageShell>
   );
 }

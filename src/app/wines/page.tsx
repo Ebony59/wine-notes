@@ -1,10 +1,25 @@
 "use client";
 
+import Link from "next/link";
 import Fuse from "fuse.js";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import MultiSearchableSelect from "@/components/MultiSearchableSelect";
 import SearchableSelect from "@/components/SearchableSelect";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import {
+  Eyebrow,
+  PageContainer,
+  PageHero,
+  PageIntro,
+  PageShell,
+  PageTitle,
+  PageTopBar,
+  PageTopNav,
+} from "@/components/ui/page-shell";
 
 type Wine = {
   id: string;
@@ -81,23 +96,25 @@ function RegionSection({
   }, [fuse, query, searchableProducers]);
 
   return (
-    <div className="rounded-xl border bg-white p-4">
-      <div className="text-sm font-semibold uppercase tracking-[0.08em] text-gray-500">
-        {region}
+    <Card className="border-stone-200 bg-white/70 p-4 sm:p-5">
+      <div className="flex items-center justify-between gap-3">
+        <div className="text-sm font-semibold uppercase tracking-[0.08em] text-stone-500">
+          {region}
+        </div>
+        <Badge variant="muted">{String(producers.length)} producers</Badge>
       </div>
 
       <div className="mt-3">
-        <input
+        <Input
           type="search"
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={`Search in ${region.toLowerCase()}...`}
-          className="w-full rounded-lg border px-3 py-2 text-sm"
         />
       </div>
 
       {filteredProducers.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-500">No matches found.</p>
+        <p className="mt-3 text-sm text-stone-500">No matches found.</p>
       ) : (
         <div className="mt-3 max-h-96 space-y-3 overflow-y-auto pr-1">
           {filteredProducers.map((producerGroup) => {
@@ -105,22 +122,22 @@ function RegionSection({
             const producerOpen = expandedProducers[producerKey] ?? false;
 
             return (
-              <div key={producerKey} className="rounded-xl border">
+              <div key={producerKey} className="rounded-2xl border border-stone-200 bg-white/80">
                 <button
                   type="button"
                   onClick={() => onToggleProducer(producerKey)}
-                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left hover:bg-gray-50"
+                  className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-stone-50"
                 >
                   <div>
-                    <div className="font-medium">{producerGroup.producer}</div>
-                    <div className="text-xs text-gray-400 mt-0.5">
+                    <div className="font-medium text-stone-900">{producerGroup.producer}</div>
+                    <div className="mt-0.5 text-xs text-stone-500">
                       {producerGroup.names.reduce((count, group) => count + group.wines.length, 0)} wines
                     </div>
                   </div>
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 20 20"
-                    className={`h-4 w-4 text-gray-500 transition-transform ${producerOpen ? "rotate-180" : ""}`}
+                    className={`h-4 w-4 text-stone-500 transition-transform ${producerOpen ? "rotate-180" : ""}`}
                   >
                     <path
                       d="M5.5 7.5 10 12l4.5-4.5"
@@ -134,52 +151,55 @@ function RegionSection({
                 </button>
 
                 {producerOpen && (
-                  <div className="space-y-2 border-t px-3 py-3">
+                  <div className="space-y-2 border-t border-stone-200 px-3 py-3">
                     {producerGroup.names.map((nameGroup) => {
                       if (nameGroup.wines.length === 1) {
                         const wine = nameGroup.wines[0];
                         return (
-                          <a
+                          <Link
                             key={wine.id}
                             href={`/wines/${wine.id}`}
-                            className="block rounded-lg border px-3 py-3 hover:bg-gray-50"
+                            className="block rounded-xl border border-stone-200 bg-white px-3 py-3 transition hover:bg-stone-50"
                           >
                             <div className="flex items-baseline justify-between gap-3">
-                              <div className="font-medium">{wine.name}</div>
-                              <div className="text-sm text-gray-500">{wine.vintage_year ?? "NV"}</div>
+                              <div className="font-medium text-stone-900">{wine.name}</div>
+                              <div className="text-sm text-stone-500">{wine.vintage_year ?? "NV"}</div>
                             </div>
                             {wine.subregions?.name && (
-                              <div className="text-xs text-gray-400 mt-0.5">{wine.subregions.name}</div>
+                              <div className="mt-0.5 text-xs text-stone-500">{wine.subregions.name}</div>
                             )}
-                          </a>
+                          </Link>
                         );
                       }
 
                       return (
-                        <div key={`${producerKey}|${nameGroup.name}`} className="rounded-lg border px-3 py-3">
+                        <div
+                          key={`${producerKey}|${nameGroup.name}`}
+                          className="rounded-xl border border-stone-200 bg-white px-3 py-3"
+                        >
                           <div className="flex items-start justify-between gap-3">
                             <div>
-                              <div className="font-medium">{nameGroup.name}</div>
+                              <div className="font-medium text-stone-900">{nameGroup.name}</div>
                               {wineLocation(nameGroup.wines[0]) && (
-                                <div className="text-xs text-gray-400 mt-0.5">
+                                <div className="mt-0.5 text-xs text-stone-500">
                                   {wineLocation(nameGroup.wines[0])}
                                 </div>
                               )}
                             </div>
-                            <div className="text-xs text-gray-400">
+                            <div className="text-xs text-stone-500">
                               {nameGroup.wines.length} vintages
                             </div>
                           </div>
 
                           <div className="mt-3 flex flex-wrap gap-2">
                             {nameGroup.wines.map((wine) => (
-                              <a
+                              <Link
                                 key={wine.id}
                                 href={`/wines/${wine.id}`}
-                                className="rounded-full border px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50"
+                                className="rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-50"
                               >
                                 {wine.vintage_year ?? "NV"}
-                              </a>
+                              </Link>
                             ))}
                           </div>
                         </div>
@@ -192,7 +212,7 @@ function RegionSection({
           })}
         </div>
       )}
-    </div>
+    </Card>
   );
 }
 
@@ -269,11 +289,6 @@ export default function WinesPage() {
 
   // Load regions when country filter changes
   useEffect(() => {
-    setFilterRegion("");
-    setFilterSubregion("");
-    setRegionOptions([]);
-    setSubregionOptions([]);
-
     if (!filterCountry) return;
 
     async function loadRegions() {
@@ -298,9 +313,6 @@ export default function WinesPage() {
 
   // Load subregions when region filter changes
   useEffect(() => {
-    setFilterSubregion("");
-    setSubregionOptions([]);
-
     if (!filterRegion) return;
 
     async function loadSubregions() {
@@ -426,28 +438,44 @@ export default function WinesPage() {
     setExpandedProducers((current) => ({ ...current, [key]: !current[key] }));
   }
 
+  function handleCountryChange(value: string) {
+    setFilterCountry(value);
+    setFilterRegion("");
+    setFilterSubregion("");
+  }
+
+  function handleRegionChange(value: string) {
+    setFilterRegion(value);
+    setFilterSubregion("");
+  }
+
   return (
-    <main className="min-h-screen p-4 md:p-6 max-w-xl mx-auto">
-      <div className="flex items-center justify-between gap-3">
-        <h1 className="text-2xl font-semibold">My Wines</h1>
+    <PageShell>
+      <PageContainer>
+        <PageTopBar>
+          <Eyebrow className="pt-1">Cellar</Eyebrow>
+          <PageTopNav>
+            <Button asChild variant="ghost" className="min-h-11 flex-1 rounded-2xl px-4 sm:flex-none">
+              <Link href="/">Home</Link>
+            </Button>
+            <Button asChild className="min-h-11 flex-1 rounded-2xl px-4 sm:flex-none">
+              <Link href="/wines/new">Add New Wine</Link>
+            </Button>
+          </PageTopNav>
+        </PageTopBar>
 
-        <div className="flex items-center gap-3">
-          <a href="/" className="text-sm underline">Home</a>
-          <a
-            href="/wines/new"
-            className="px-4 py-2 rounded-lg bg-black text-white hover:opacity-90"
-          >
-            Add new wine
-          </a>
-        </div>
-      </div>
+        <PageHero>
+          <PageTitle>Browse your wines by place and producer.</PageTitle>
+          <PageIntro>
+            Search directly, then narrow by country, region, sub-region, or grape.
+          </PageIntro>
+        </PageHero>
 
-      {/* Search with dropdown */}
-      <div ref={searchRef} className="mt-4 relative">
-        <input
+        <Card className="mt-8">
+          <div ref={searchRef} className="relative">
+            <Input
           type="search"
-          className="border rounded-lg px-4 py-2 w-full text-sm"
-          placeholder="Search wines…"
+          placeholder="Search wines..."
           value={search}
           onChange={(e) => {
             setSearch(e.target.value);
@@ -458,34 +486,33 @@ export default function WinesPage() {
         />
 
         {searchOpen && searchResults.length > 0 && (
-          <ul className="absolute z-20 top-full mt-1 w-full bg-white border rounded-lg shadow-lg max-h-72 overflow-auto">
+          <ul className="absolute top-full z-20 mt-2 max-h-72 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
             {searchResults.map((w) => (
               <li key={w.id}>
-                <a
+                <Link
                   href={`/wines/${w.id}`}
-                  className="flex items-baseline justify-between gap-3 px-4 py-2.5 hover:bg-gray-50"
+                  className="flex items-baseline justify-between gap-3 rounded-xl px-4 py-2.5 transition hover:bg-stone-50"
                   onMouseDown={(e) => e.preventDefault()}
                 >
                   <div>
-                    <div className="text-sm font-medium">{w.name}</div>
+                    <div className="text-sm font-medium text-stone-900">{w.name}</div>
                     {wineLocation(w) && (
-                      <div className="text-xs text-gray-400">{wineLocation(w)}</div>
+                      <div className="text-xs text-stone-500">{wineLocation(w)}</div>
                     )}
                   </div>
-                  <div className="text-sm text-gray-400 shrink-0">
+                  <div className="shrink-0 text-sm text-stone-500">
                     {w.vintage_year ?? "NV"}
                   </div>
-                </a>
+                </Link>
               </li>
             ))}
           </ul>
         )}
-      </div>
+          </div>
 
-      {/* Filters */}
-      <div className="mt-3 rounded-xl border p-4 bg-gray-50">
-        <div className="flex items-center justify-between mb-3">
-          <span className="text-sm font-medium">Filter</span>
+          <div className="mt-5 rounded-[24px] border border-stone-200 bg-stone-50/80 p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-sm font-medium text-stone-800">Filter</span>
           {hasFilters && (
             <button
               onClick={() => {
@@ -493,66 +520,75 @@ export default function WinesPage() {
                 setFilterRegion("");
                 setFilterSubregion("");
                 setFilterGrapes([]);
+                setRegionOptions([]);
+                setSubregionOptions([]);
               }}
-              className="text-xs text-gray-500 underline"
+                  className="text-xs text-stone-500 underline"
             >
               Clear all
             </button>
           )}
-        </div>
+            </div>
 
-        <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Country</label>
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+              <div>
+                <label className="mb-1 block text-xs text-stone-500">Country</label>
             <SearchableSelect
               value={filterCountry}
-              onChange={setFilterCountry}
+              onChange={handleCountryChange}
               options={countryOptions}
               placeholder="All countries"
             />
-          </div>
+              </div>
 
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Region</label>
+              <div>
+                <label className="mb-1 block text-xs text-stone-500">Region</label>
             <SearchableSelect
               value={filterRegion}
-              onChange={setFilterRegion}
-              options={regionOptions}
+              onChange={handleRegionChange}
+              options={filterCountry ? regionOptions : []}
               placeholder="All regions"
               disabled={!filterCountry || regionOptions.length === 0}
             />
-          </div>
+              </div>
 
-          <div>
-            <label className="text-xs text-gray-500 mb-1 block">Sub-region</label>
+              <div>
+                <label className="mb-1 block text-xs text-stone-500">Sub-region</label>
             <SearchableSelect
               value={filterSubregion}
               onChange={setFilterSubregion}
-              options={subregionOptions}
+              options={filterRegion ? subregionOptions : []}
               placeholder="All sub-regions"
               disabled={!filterRegion || subregionOptions.length === 0}
             />
-          </div>
-        </div>
+              </div>
+            </div>
 
-        <div className="mt-2">
-          <label className="text-xs text-gray-500 mb-1 block">Grape</label>
+            <div className="mt-2">
+              <label className="mb-1 block text-xs text-stone-500">Grape</label>
           <MultiSearchableSelect
             values={filterGrapes}
             onChange={setFilterGrapes}
             options={grapeOptions}
             placeholder="Select grapes"
           />
-        </div>
-      </div>
+            </div>
+          </div>
+        </Card>
 
-      {/* Wine list — only affected by dropdown filters */}
-      <section className="rounded-xl border p-4 mt-4">
-        <div className="divide-y">
+        <Card className="mt-4">
+          <CardTitle>Wine List</CardTitle>
+          <CardDescription className="mt-2">
+            Grouped by country, then region, then producer.
+          </CardDescription>
+          <div className="mt-5 divide-y divide-stone-200">
           {groupedWines.map((countryGroup) => {
             return (
               <div key={countryGroup.country} className="py-4 first:pt-0 last:pb-0">
-                <div className="text-lg font-semibold">{countryGroup.country}</div>
+                <div className="flex items-center justify-between gap-3">
+                  <div className="text-lg font-semibold text-stone-900">{countryGroup.country}</div>
+                  <Badge>{String(countryGroup.regions.length)} regions</Badge>
+                </div>
 
                 <div className="mt-4 space-y-4">
                   {countryGroup.regions.map((regionGroup) => (
@@ -571,18 +607,19 @@ export default function WinesPage() {
           })}
 
           {filteredWines.length === 0 && wines.length > 0 && (
-            <div className="text-sm text-gray-600 py-3">
+            <div className="py-3 text-sm text-stone-600">
               No wines match the current filters.
             </div>
           )}
 
           {wines.length === 0 && (
-            <div className="text-sm text-gray-600 py-3">
+            <div className="py-3 text-sm text-stone-600">
               No wines yet — add your first one!
             </div>
           )}
-        </div>
-      </section>
-    </main>
+          </div>
+        </Card>
+      </PageContainer>
+    </PageShell>
   );
 }

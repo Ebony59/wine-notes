@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { Input } from "@/components/ui/input";
+import { cn } from "@/lib/utils";
 
 type Props = {
   value: string;
@@ -32,11 +34,9 @@ export default function AutocompleteInput({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  // Reset active index whenever suggestions list changes
-  useEffect(() => setActiveIndex(-1), [suggestions]);
-
   function handleChange(v: string) {
     onChange(v);
+    setActiveIndex(-1);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
@@ -50,6 +50,7 @@ export default function AutocompleteInput({
     debounceRef.current = setTimeout(async () => {
       const results = await fetchSuggestions(trimmed);
       setSuggestions(results);
+      setActiveIndex(-1);
       setOpen(results.length > 0);
     }, 200);
   }
@@ -78,26 +79,29 @@ export default function AutocompleteInput({
 
   return (
     <div ref={containerRef} className="relative">
-      <input
-        className="border rounded px-3 py-2 w-full"
+      <Input
         placeholder={placeholder}
         value={value}
-        onChange={e => handleChange(e.target.value)}
+        onChange={(e) => handleChange(e.target.value)}
         onFocus={() => suggestions.length > 0 && setOpen(true)}
         onKeyDown={handleKeyDown}
         autoComplete="off"
       />
       {open && (
-        <ul className="absolute z-20 top-full mt-1 w-full bg-white border rounded-lg shadow-lg max-h-52 overflow-auto">
+        <ul className="absolute top-full z-20 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           {suggestions.map((s, i) => (
             <li key={s}>
               <button
                 type="button"
-                className={`w-full text-left px-3 py-2 text-sm ${
-                  i === activeIndex ? "bg-gray-100" : "hover:bg-gray-50"
-                }`}
+                className={cn(
+                  "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition",
+                  i === activeIndex ? "bg-stone-100 text-stone-900" : "hover:bg-stone-50"
+                )}
                 // mousedown fires before blur, so we prevent default to keep focus in the input
-                onMouseDown={e => { e.preventDefault(); select(s); }}
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  select(s);
+                }}
               >
                 {s}
               </button>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { cn } from "@/lib/utils";
 
 type Props = {
   values: string[];
@@ -37,8 +38,6 @@ export default function TagAutocompleteInput({
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
-  useEffect(() => setActiveIndex(-1), [suggestions]);
-
   function addTag(rawValue: string) {
     const tag = normalizeTag(rawValue);
     if (!tag) return;
@@ -61,6 +60,7 @@ export default function TagAutocompleteInput({
 
   function handleChange(nextValue: string) {
     setQuery(nextValue);
+    setActiveIndex(-1);
 
     if (debounceRef.current) clearTimeout(debounceRef.current);
 
@@ -77,6 +77,7 @@ export default function TagAutocompleteInput({
         (result) => !values.some((value) => value.toLowerCase() === result.toLowerCase())
       );
       setSuggestions(filtered);
+      setActiveIndex(-1);
       setOpen(filtered.length > 0);
     }, 200);
   }
@@ -117,17 +118,17 @@ export default function TagAutocompleteInput({
 
   return (
     <div ref={containerRef} className="relative">
-      <div className="rounded border px-3 py-2">
+      <div className="rounded-2xl border border-stone-300 bg-stone-50 px-4 py-3 shadow-sm transition focus-within:border-stone-500 focus-within:bg-white">
         <div className="flex flex-wrap gap-2">
           {values.map((value) => (
             <span
               key={value}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-sm"
+              className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-sm text-stone-700"
             >
               {value}
               <button
                 type="button"
-                className="text-gray-500 hover:text-gray-700"
+                className="text-stone-500 hover:text-stone-700"
                 onClick={() => removeTag(value)}
                 aria-label={`Remove ${value}`}
               >
@@ -137,7 +138,7 @@ export default function TagAutocompleteInput({
           ))}
 
           <input
-            className="min-w-[12rem] flex-1 border-0 p-0 text-sm outline-none"
+            className="min-w-[12rem] flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-400"
             placeholder={values.length === 0 ? placeholder : undefined}
             value={query}
             onChange={(e) => handleChange(e.target.value)}
@@ -150,14 +151,15 @@ export default function TagAutocompleteInput({
       </div>
 
       {open && (
-        <ul className="absolute z-20 top-full mt-1 w-full overflow-auto rounded-lg border bg-white shadow-lg">
+        <ul className="absolute top-full z-20 mt-2 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           {suggestions.map((suggestion, index) => (
             <li key={suggestion}>
               <button
                 type="button"
-                className={`w-full px-3 py-2 text-left text-sm ${
-                  index === activeIndex ? "bg-gray-100" : "hover:bg-gray-50"
-                }`}
+                className={cn(
+                  "w-full rounded-xl px-3 py-2 text-left text-sm text-stone-700 transition",
+                  index === activeIndex ? "bg-stone-100 text-stone-900" : "hover:bg-stone-50"
+                )}
                 onMouseDown={(e) => {
                   e.preventDefault();
                   addTag(suggestion);

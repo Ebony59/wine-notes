@@ -1,8 +1,14 @@
 "use client";
 
 import Fuse from "fuse.js";
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Eyebrow, PageContainer, PageHero, PageIntro, PageShell, PageTitle } from "@/components/ui/page-shell";
 
 type Country = {
   id: number;
@@ -28,21 +34,21 @@ type Grape = {
   name: string;
 };
 
+type LookupItem = {
+  id: number;
+  label: string;
+  detail?: string;
+};
+
 type LookupSectionProps = {
   title: string;
   emptyText: string;
-  items: { id: number; label: string; detail?: string }[];
+  items: LookupItem[];
   onRename: (item: { id: number; label: string }) => Promise<void>;
   onDelete: (item: { id: number; label: string }) => Promise<void>;
 };
 
-function LookupSection({
-  title,
-  emptyText,
-  items,
-  onRename,
-  onDelete,
-}: LookupSectionProps) {
+function LookupSection({ title, emptyText, items, onRename, onDelete }: LookupSectionProps) {
   const [query, setQuery] = useState("");
 
   const fuse = useMemo(
@@ -57,48 +63,54 @@ function LookupSection({
   }, [fuse, items, query]);
 
   return (
-    <section className="rounded-xl border p-4">
+    <Card className="border-stone-300/80">
       <div className="flex items-center justify-between gap-3">
-        <h2 className="text-base font-semibold">{title}</h2>
-        <span className="text-xs text-gray-400">{items.length}</span>
+        <div>
+          <h2 className="text-base font-semibold text-stone-900">{title}</h2>
+        </div>
+        <Badge>{String(items.length)}</Badge>
       </div>
 
       {items.length === 0 ? (
-        <p className="mt-3 text-sm text-gray-500">{emptyText}</p>
+        <p className="mt-4 text-sm text-stone-500">{emptyText}</p>
       ) : (
         <>
-          <div className="mt-3">
-            <input
+          <div className="mt-4">
+            <Input
               type="search"
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder={`Search ${title.toLowerCase()}...`}
-              className="w-full rounded-lg border px-3 py-2 text-sm"
             />
           </div>
 
           {filteredItems.length === 0 ? (
-            <p className="mt-3 text-sm text-gray-500">No matches found.</p>
+            <p className="mt-4 text-sm text-stone-500">No matches found.</p>
           ) : (
-            <div className="mt-3 max-h-72 overflow-y-auto divide-y pr-1">
+            <div className="mt-4 max-h-72 space-y-3 overflow-y-auto pr-1">
               {filteredItems.map((item) => (
-                <div key={item.id} className="flex items-start justify-between gap-3 py-3">
+                <div
+                  key={item.id}
+                  className="flex items-start justify-between gap-3 rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3"
+                >
                   <div>
-                    <div className="text-sm font-medium">{item.label}</div>
-                    {item.detail && <div className="text-xs text-gray-500 mt-0.5">{item.detail}</div>}
+                    <div className="text-sm font-medium text-stone-900">{item.label}</div>
+                    {item.detail ? (
+                      <div className="mt-1 text-xs text-stone-500">{item.detail}</div>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-3">
                     <button
                       type="button"
                       onClick={() => onRename(item)}
-                      className="text-xs text-gray-500 underline"
+                      className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
                     >
                       Rename
                     </button>
                     <button
                       type="button"
                       onClick={() => onDelete(item)}
-                      className="text-xs text-red-500 underline"
+                      className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
                     >
                       Delete
                     </button>
@@ -109,7 +121,7 @@ function LookupSection({
           )}
         </>
       )}
-    </section>
+    </Card>
   );
 }
 
@@ -122,15 +134,7 @@ export default function Home() {
   const [grapes, setGrapes] = useState<Grape[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      const nextEmail = data.user?.email ?? null;
-      setEmail(nextEmail);
-      if (nextEmail) loadLookups();
-    });
-  }, [supabase]);
-
-  async function loadLookups() {
+  const loadLookups = useCallback(async () => {
     const [countryRes, regionRes, subregionRes, grapeRes] = await Promise.all([
       supabase.from("countries").select("id,name").order("name"),
       supabase.from("regions").select("id,name,country_id,countries(name)").order("name"),
@@ -147,7 +151,15 @@ export default function Home() {
     setRegions((regionRes.data as Region[]) ?? []);
     setSubregions((subregionRes.data as Subregion[]) ?? []);
     setGrapes((grapeRes.data as Grape[]) ?? []);
-  }
+  }, [supabase]);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data }) => {
+      const nextEmail = data.user?.email ?? null;
+      setEmail(nextEmail);
+      if (nextEmail) loadLookups();
+    });
+  }, [supabase, loadLookups]);
 
   async function signInWithGoogle() {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -361,95 +373,111 @@ export default function Home() {
   }));
 
   return (
-    <main className="min-h-screen max-w-3xl mx-auto p-6">
-      <h1 className="text-2xl font-semibold">Wine Notes</h1>
+    <PageShell>
+      <PageContainer>
+        <PageHero>
+          <Eyebrow>Wine Notes</Eyebrow>
+          <PageTitle>Wine Notes</PageTitle>
+          <PageIntro>
+            Track bottles, tastings, and lookup data in one place.
+          </PageIntro>
+        </PageHero>
 
-      <div className="mt-6 rounded-xl border p-4">
-        {email ? (
-          <>
-            <p className="text-sm">
-              Signed in as: <b>{email}</b>
-            </p>
+        <section className="mt-8 rounded-[32px] border border-[#d4c3ae] bg-[radial-gradient(circle_at_top,#fffdf8,transparent_38%),linear-gradient(180deg,#fff7ed_0%,#f7ecdf_100%)] p-4">
+          <Card className="border-[#e7d8c5] bg-white/75 shadow-[0_24px_70px_rgba(102,60,28,0.12)] sm:p-8">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <Badge className="mb-3">Dashboard</Badge>
+                <CardTitle>Manage your cellar and the lookup tables behind it.</CardTitle>
+                <CardDescription className="mt-2 max-w-xl">
+                  Browse wines, add new bottles, and keep countries, regions, sub-regions, and grapes tidy.
+                </CardDescription>
+              </div>
+              {busyKey ? (
+                <Badge variant="muted" className="bg-amber-100 text-amber-800">Saving...</Badge>
+              ) : null}
+            </div>
 
-            <div className="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <a
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <Link
                 href="/wines"
-                className="px-4 py-3 rounded-lg border text-center hover:bg-gray-50"
+                className="inline-flex items-center justify-center rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm font-medium text-stone-800 transition hover:border-stone-500"
               >
                 My Wines
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/wines/new"
-                className="px-4 py-3 rounded-lg bg-black text-white text-center hover:opacity-90"
+                className="inline-flex items-center justify-center rounded-2xl bg-stone-900 px-4 py-3 text-sm font-medium text-stone-50 transition hover:bg-stone-700"
               >
-                Add new wine
-              </a>
+                Add New Wine
+              </Link>
             </div>
 
-            <div className="mt-8">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h2 className="text-lg font-semibold">Manage Lookups</h2>
-                  <p className="text-sm text-gray-500">
-                    Rename or delete countries, regions, sub-regions, and grapes.
-                  </p>
+            {email ? (
+              <>
+                <div className="mt-6 rounded-[24px] border border-stone-200 bg-white/80 p-4">
+                  <p className="text-sm text-stone-600">Signed in as</p>
+                  <p className="mt-1 text-base font-semibold text-stone-900">{email}</p>
                 </div>
-                {busyKey && <span className="text-xs text-gray-400">Saving…</span>}
-              </div>
 
-              <div className="mt-4 grid gap-4">
-                <LookupSection
-                  title="Countries"
-                  emptyText="No countries yet."
-                  items={countryItems}
-                  onRename={renameCountry}
-                  onDelete={deleteCountry}
-                />
-                <LookupSection
-                  title="Regions"
-                  emptyText="No regions yet."
-                  items={regionItems}
-                  onRename={renameRegion}
-                  onDelete={deleteRegion}
-                />
-                <LookupSection
-                  title="Sub-regions"
-                  emptyText="No sub-regions yet."
-                  items={subregionItems}
-                  onRename={renameSubregion}
-                  onDelete={deleteSubregion}
-                />
-                <LookupSection
-                  title="Grapes"
-                  emptyText="No grapes yet."
-                  items={grapeItems}
-                  onRename={renameGrape}
-                  onDelete={deleteGrape}
-                />
-              </div>
-            </div>
+                <div className="mt-6">
+                  <div className="flex items-end justify-between gap-3">
+                    <div>
+                      <h3 className="font-serif text-2xl text-stone-900">Manage Knowledges</h3>
+                      <p className="mt-1 text-sm text-stone-600">
+                        Rename or delete countries, regions, sub-regions, and grapes.
+                      </p>
+                    </div>
+                    <Badge>4 groups</Badge>
+                  </div>
 
-            <button
-              onClick={signOut}
-              className="mt-6 px-4 py-2 rounded border"
-            >
-              Sign out
-            </button>
-          </>
-        ) : (
-          <>
-            <p className="text-sm text-gray-600">
-              Sign in to start saving tasting notes.
-            </p>
-            <button
-              onClick={signInWithGoogle}
-              className="mt-3 px-4 py-2 rounded bg-black text-white"
-            >
-              Sign in with Google
-            </button>
-          </>
-        )}
-      </div>
-    </main>
+                  <div className="mt-4 grid gap-4">
+                    <LookupSection
+                      title="Countries"
+                      emptyText="No countries yet."
+                      items={countryItems}
+                      onRename={renameCountry}
+                      onDelete={deleteCountry}
+                    />
+                    <LookupSection
+                      title="Regions"
+                      emptyText="No regions yet."
+                      items={regionItems}
+                      onRename={renameRegion}
+                      onDelete={deleteRegion}
+                    />
+                    <LookupSection
+                      title="Sub-regions"
+                      emptyText="No sub-regions yet."
+                      items={subregionItems}
+                      onRename={renameSubregion}
+                      onDelete={deleteSubregion}
+                    />
+                    <LookupSection
+                      title="Grapes"
+                      emptyText="No grapes yet."
+                      items={grapeItems}
+                      onRename={renameGrape}
+                      onDelete={deleteGrape}
+                    />
+                  </div>
+                </div>
+
+                <Button type="button" variant="secondary" onClick={signOut} className="mt-6 rounded-full">
+                  Sign Out
+                </Button>
+              </>
+            ) : (
+              <div className="mt-6 rounded-[24px] border border-dashed border-stone-300 bg-white/70 p-5">
+                <p className="text-sm text-stone-600">Sign in to start saving tasting notes.</p>
+                <Button type="button" onClick={signInWithGoogle} className="mt-4">
+                  Sign In with Google
+                </Button>
+              </div>
+            )}
+          </Card>
+        </section>
+      </PageContainer>
+    </PageShell>
   );
 }
