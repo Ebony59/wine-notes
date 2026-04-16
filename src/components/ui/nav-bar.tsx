@@ -47,9 +47,12 @@ export function NavBar() {
   }
 
   async function signIn() {
+    const next = `${location.pathname}${location.search}`;
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
-      options: { redirectTo: `${location.origin}/` },
+      options: {
+        redirectTo: `${location.origin}/auth/callback?next=${encodeURIComponent(next)}`,
+      },
     });
     if (error) alert(error.message);
   }

@@ -1,8 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import Fuse from "fuse.js";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
+import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { PhotoPicker } from "@/components/PhotoPicker";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
 import { Button } from "@/components/ui/button";
@@ -18,6 +22,8 @@ import {
   PageTitle,
 } from "@/components/ui/page-shell";
 import { Textarea } from "@/components/ui/textarea";
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function normalizeField(v: string) {
   const t = v.trim();
@@ -52,12 +58,15 @@ function formatVintage(year: number | null) {
   return year ?? "NV";
 }
 
+// ── Component ─────────────────────────────────────────────────────────────────
+
 export default function AddWinePage() {
   const supabase = useMemo(() => createClient(), []);
 
   const [userId, setUserId] = useState<string | null>(null);
   const [existingWines, setExistingWines] = useState<ExistingWine[]>([]);
 
+  // Wine fields
   const [name, setName] = useState("");
   const [vintage, setVintage] = useState("");
   const [country, setCountry] = useState("NA");
@@ -65,8 +74,16 @@ export default function AddWinePage() {
   const [subregion, setSubregion] = useState("NA");
   const [producer, setProducer] = useState("NA");
   const [grapes, setGrapes] = useState<string[]>([]);
+
+  // Tasting fields
   const [tastedOn, setTastedOn] = useState("");
   const [notes, setNotes] = useState("");
+
+  // Pending photos (kept in sync by PhotoPicker via onChange)
+  const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
+  const [uploading, setUploading] = useState(false);
+
+  // Name autocomplete
   const [nameSearch, setNameSearch] = useState("");
   const [nameOpen, setNameOpen] = useState(false);
 
@@ -125,6 +142,136 @@ export default function AddWinePage() {
     return () => document.removeEventListener("mousedown", handleClick);
   }, []);
 
+  useEffect(() => {
+    const regionName = normalizeField(region);
+    if (!regionName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findRegionHierarchy(supabase, regionName, normalizeField(country));
+        if (!cancelled && match?.countryName && match.countryName !== country) {
+          setCountry(match.countryName);
+        }
+      } catch (error) {
+        console.error("Failed to autofill country from region", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, region, supabase]);
+
+  useEffect(() => {
+    const subregionName = normalizeField(subregion);
+    if (!subregionName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findSubregionHierarchy(
+          supabase,
+          subregionName,
+          normalizeField(region),
+          normalizeField(country),
+        );
+
+        if (cancelled || !match) return;
+        if (match.regionName !== region) setRegion(match.regionName);
+        if (match.countryName && match.countryName !== country) setCountry(match.countryName);
+      } catch (error) {
+        console.error("Failed to autofill parent regions from sub-region", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, region, subregion, supabase]);
+
+  useEffect(() => {
+    const producerName = normalizeField(producer);
+    if (!producerName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findProducerHierarchy(
+          supabase,
+          producerName,
+          normalizeField(region),
+          normalizeField(country),
+        );
+
+        if (cancelled || !match) return;
+        if (match.regionName && match.regionName !== region) setRegion(match.regionName);
+        if (match.countryName && match.countryName !== country) setCountry(match.countryName);
+      } catch (error) {
+        console.error("Failed to autofill location from producer", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, producer, region, supabase]);
+
+  async function autofillFromRegion(regionName: string) {
+    const normalizedRegion = normalizeField(regionName);
+    if (!normalizedRegion) return;
+
+    try {
+      const match = await findRegionHierarchy(supabase, normalizedRegion, normalizeField(country));
+      if (match?.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill country from region selection", error);
+    }
+  }
+
+  async function autofillFromSubregion(subregionName: string) {
+    const normalizedSubregion = normalizeField(subregionName);
+    if (!normalizedSubregion) return;
+
+    try {
+      const match = await findSubregionHierarchy(
+        supabase,
+        normalizedSubregion,
+        normalizeField(region),
+        normalizeField(country),
+      );
+
+      if (!match) return;
+      setRegion(match.regionName);
+      if (match.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill parent regions from sub-region selection", error);
+    }
+  }
+
+  async function autofillFromProducer(producerName: string) {
+    const normalizedProducer = normalizeField(producerName);
+    if (!normalizedProducer) return;
+
+    try {
+      const match = await findProducerHierarchy(
+        supabase,
+        normalizedProducer,
+        normalizeField(region),
+        normalizeField(country),
+      );
+
+      if (!match) return;
+      if (match.regionName) setRegion(match.regionName);
+      if (match.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill location from producer selection", error);
+    }
+  }
+
   function applyExistingWine(wine: ExistingWine) {
     setName(wine.name);
     setNameSearch(wine.name);
@@ -145,107 +292,105 @@ export default function AddWinePage() {
     setNameOpen(false);
   }
 
-  async function ensureCountryId(countryName: string): Promise<number> {
-    // countries.name is unique
-    const { data: existing, error: selErr } = await supabase
-      .from("countries")
-      .select("id")
-      .eq("name", countryName)
-      .maybeSingle();
+  // ── DB helpers ────────────────────────────────────────────────────────────────
 
+  async function ensureCountryId(countryName: string): Promise<number> {
+    const { data: existing, error: selErr } = await supabase
+      .from("countries").select("id").eq("name", countryName).maybeSingle();
     if (selErr) throw selErr;
     if (existing?.id) return existing.id;
-
     const { data: inserted, error: insErr } = await supabase
-      .from("countries")
-      .insert({ name: countryName })
-      .select("id")
-      .single();
-
+      .from("countries").insert({ name: countryName }).select("id").single();
     if (insErr) throw insErr;
     return inserted.id;
   }
 
-  async function ensureProducerId(producerName: string): Promise<number> {
+  async function ensureProducerId(producerName: string, regionId: number | null): Promise<number> {
     const { data: existing, error: selErr } = await supabase
-      .from("producers")
-      .select("id")
-      .eq("name", producerName)
-      .maybeSingle();
-
+      .from("producers").select("id,region_id").eq("name", producerName).maybeSingle();
     if (selErr) throw selErr;
-    if (existing?.id) return existing.id;
-
+    if (existing?.id) {
+      if (existing.region_id === null && regionId !== null) {
+        const { error: updateError } = await supabase
+          .from("producers")
+          .update({ region_id: regionId })
+          .eq("id", existing.id);
+        if (updateError) throw updateError;
+      }
+      return existing.id;
+    }
     const { data: inserted, error: insErr } = await supabase
-      .from("producers")
-      .insert({ name: producerName })
-      .select("id")
-      .single();
-
+      .from("producers").insert({ name: producerName, region_id: regionId }).select("id").single();
     if (insErr) throw insErr;
     return inserted.id;
   }
 
   async function ensureRegionId(countryId: number, regionName: string): Promise<number> {
     const { data: existing, error: selErr } = await supabase
-      .from("regions")
-      .select("id")
-      .eq("country_id", countryId)
-      .eq("name", regionName)
-      .maybeSingle();
-
+      .from("regions").select("id").eq("country_id", countryId).eq("name", regionName).maybeSingle();
     if (selErr) throw selErr;
     if (existing?.id) return existing.id;
-
     const { data: inserted, error: insErr } = await supabase
-      .from("regions")
-      .insert({ country_id: countryId, name: regionName })
-      .select("id")
-      .single();
-
+      .from("regions").insert({ country_id: countryId, name: regionName }).select("id").single();
     if (insErr) throw insErr;
     return inserted.id;
   }
 
   async function ensureSubregionId(regionId: number, subregionName: string): Promise<number> {
     const { data: existing, error: selErr } = await supabase
-      .from("subregions")
-      .select("id")
-      .eq("region_id", regionId)
-      .eq("name", subregionName)
-      .maybeSingle();
-
+      .from("subregions").select("id").eq("region_id", regionId).eq("name", subregionName).maybeSingle();
     if (selErr) throw selErr;
     if (existing?.id) return existing.id;
-
     const { data: inserted, error: insErr } = await supabase
-      .from("subregions")
-      .insert({ region_id: regionId, name: subregionName })
-      .select("id")
-      .single();
-
+      .from("subregions").insert({ region_id: regionId, name: subregionName }).select("id").single();
     if (insErr) throw insErr;
     return inserted.id;
   }
 
   async function ensureGrapeId(grapeName: string): Promise<number> {
     const { data: existing, error: selErr } = await supabase
-      .from("grapes")
-      .select("id")
-      .eq("name", grapeName)
-      .maybeSingle();
-
+      .from("grapes").select("id").eq("name", grapeName).maybeSingle();
     if (selErr) throw selErr;
     if (existing?.id) return existing.id;
-
     const { data: inserted, error: insErr } = await supabase
-      .from("grapes")
-      .insert({ name: grapeName })
-      .select("id")
-      .single();
-
+      .from("grapes").insert({ name: grapeName }).select("id").single();
     if (insErr) throw insErr;
     return inserted.id;
+  }
+
+  // Upload a single pending photo (file or URL) linked to a tasting or as general.
+  // All values passed explicitly — avoids stale-closure issues with the React Compiler.
+  async function savePendingPhoto(
+    wineId: string,
+    tastingId: string | null,
+    photo: PendingPhoto,
+    uid: string,
+  ) {
+    if (photo.url) {
+      const { error } = await supabase.from("wine_photos").insert({
+        wine_id: wineId, tasting_id: tastingId, external_url: photo.url,
+      });
+      if (error) alert(`Photo could not be saved: ${error.message}`);
+      return;
+    }
+
+    if (photo.file) {
+      let convertedFile: File;
+      try {
+        convertedFile = await convertIfNeeded(photo.file);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "unknown error";
+        alert(`Could not convert image: ${message}.`);
+        return;
+      }
+      const path = `${uid}/${wineId}/${photo.file.lastModified}_${convertedFile.name}`;
+      const { error: upErr } = await supabase.storage.from("wine-photos").upload(path, convertedFile);
+      if (upErr) { alert(upErr.message); return; }
+      const { error: insertErr } = await supabase.from("wine_photos").insert({
+        wine_id: wineId, tasting_id: tastingId, storage_path: path,
+      });
+      if (insertErr) alert(`Photo uploaded but could not be linked: ${insertErr.message}`);
+    }
   }
 
   async function saveWine() {
@@ -255,7 +400,12 @@ export default function AddWinePage() {
     if (!wineName) return alert("Name is required.");
 
     const vintageYear = normalizeVintage(vintage);
-    if ((vintage.trim() && vintage.trim().toUpperCase() !== "NV" && vintage.trim().toUpperCase() !== "NA") && Number.isNaN(vintageYear)) {
+    if (
+      vintage.trim() &&
+      vintage.trim().toUpperCase() !== "NV" &&
+      vintage.trim().toUpperCase() !== "NA" &&
+      Number.isNaN(vintageYear)
+    ) {
       return alert("Vintage must be a year like 2019, or NV, or NA.");
     }
 
@@ -264,71 +414,53 @@ export default function AddWinePage() {
     const subregionName = normalizeField(subregion);
     const producerName = normalizeField(producer);
 
-    // Build IDs only when provided
+    const hasTasting = notes.trim() || tastedOn;
+    const photosSnapshot = pendingPhotos; // capture before any async work
+
     let country_id: number | null = null;
     let region_id: number | null = null;
     let subregion_id: number | null = null;
     let producer_id: number | null = null;
 
     try {
-      if (countryName) {
-        country_id = await ensureCountryId(countryName);
-      }
+      if (countryName) country_id = await ensureCountryId(countryName);
+      if (regionName && country_id) region_id = await ensureRegionId(country_id, regionName);
+      if (subregionName && region_id) subregion_id = await ensureSubregionId(region_id, subregionName);
+      if (producerName) producer_id = await ensureProducerId(producerName, region_id);
 
-      // If region is set but country is NA, we still allow saving wine (just won't create region)
-      if (regionName && country_id) {
-        region_id = await ensureRegionId(country_id, regionName);
-      }
-
-      // If subregion is set but region/country missing, we allow saving (just won't create subregion)
-      if (subregionName && region_id) {
-        subregion_id = await ensureSubregionId(region_id, subregionName);
-      }
-
-      if (producerName) {
-        producer_id = await ensureProducerId(producerName);
-      }
-
-      // Check for an existing wine with identical details before creating a new one
+      // Check for an existing wine with identical details
       let dupQuery = supabase.from("wines").select("id").eq("name", wineName);
-      if (vintageYear === null || vintageYear === undefined) {
-        dupQuery = dupQuery.is("vintage_year", null);
-      } else {
-        dupQuery = dupQuery.eq("vintage_year", vintageYear as number);
-      }
-      if (country_id === null) {
-        dupQuery = dupQuery.is("country_id", null);
-      } else {
-        dupQuery = dupQuery.eq("country_id", country_id);
-      }
-      if (region_id === null) {
-        dupQuery = dupQuery.is("region_id", null);
-      } else {
-        dupQuery = dupQuery.eq("region_id", region_id);
-      }
-      if (subregion_id === null) {
-        dupQuery = dupQuery.is("subregion_id", null);
-      } else {
-        dupQuery = dupQuery.eq("subregion_id", subregion_id);
-      }
-      if (producer_id === null) {
-        dupQuery = dupQuery.is("producer_id", null);
-      } else {
-        dupQuery = dupQuery.eq("producer_id", producer_id);
-      }
+      if (vintageYear === null || vintageYear === undefined) { dupQuery = dupQuery.is("vintage_year", null); }
+      else { dupQuery = dupQuery.eq("vintage_year", vintageYear as number); }
+      if (country_id === null) { dupQuery = dupQuery.is("country_id", null); }
+      else { dupQuery = dupQuery.eq("country_id", country_id); }
+      if (region_id === null) { dupQuery = dupQuery.is("region_id", null); }
+      else { dupQuery = dupQuery.eq("region_id", region_id); }
+      if (subregion_id === null) { dupQuery = dupQuery.is("subregion_id", null); }
+      else { dupQuery = dupQuery.eq("subregion_id", subregion_id); }
+      if (producer_id === null) { dupQuery = dupQuery.is("producer_id", null); }
+      else { dupQuery = dupQuery.eq("producer_id", producer_id); }
 
       const { data: existingMatch, error: dupError } = await dupQuery.maybeSingle();
       if (dupError) return alert(dupError.message);
 
       if (existingMatch) {
-        // Wine already exists — add the tasting note to it and redirect
-        if (notes.trim() || tastedOn) {
-          const { error: tastingError } = await supabase.from("wine_tastings").insert({
-            wine_id: existingMatch.id,
-            tasted_on: tastedOn || null,
-            notes: notes.trim() || null,
-          });
-          if (tastingError) return alert(tastingError.message);
+        // Wine already exists — add tasting + photos, then redirect
+        let savedTastingId: string | null = null;
+        if (hasTasting) {
+          const { data: td, error: te } = await supabase.from("wine_tastings")
+            .insert({ wine_id: existingMatch.id, tasted_on: tastedOn || null, notes: notes.trim() || null })
+            .select("id").single();
+          if (te) return alert(te.message);
+          savedTastingId = td.id;
+        }
+        if (photosSnapshot.length > 0) {
+          setUploading(true);
+          const tastingId = hasTasting ? savedTastingId : null;
+          for (const photo of photosSnapshot) {
+            await savePendingPhoto(existingMatch.id, tastingId, photo, userId);
+          }
+          setUploading(false);
         }
         location.href = `/wines/${existingMatch.id}`;
         return;
@@ -339,36 +471,40 @@ export default function AddWinePage() {
         user_id: userId,
         name: wineName,
         vintage_year: vintageYear ?? null,
-        country_id,
-        region_id,
-        subregion_id,
-        producer_id,
+        country_id, region_id, subregion_id, producer_id,
       }).select("id").single();
-
       if (error) return alert(error.message);
 
       if (grapes.length > 0) {
-        const grapeIds = await Promise.all(grapes.map((grape) => ensureGrapeId(grape)));
+        const grapeIds = await Promise.all(grapes.map(g => ensureGrapeId(g)));
         const { error: grapeError } = await supabase.from("wine_grapes").insert(
-          grapeIds.map((grapeId) => ({ wine_id: newWine.id, grape_id: grapeId }))
+          grapeIds.map(grapeId => ({ wine_id: newWine.id, grape_id: grapeId }))
         );
         if (grapeError) return alert(grapeError.message);
       }
 
-      // Save first tasting note if provided
-      if (notes.trim() || tastedOn) {
-        await supabase.from("wine_tastings").insert({
-          wine_id: newWine.id,
-          tasted_on: tastedOn || null,
-          notes: notes.trim() || null,
-        });
+      let savedTastingId: string | null = null;
+      if (hasTasting) {
+        const { data: td, error: te } = await supabase.from("wine_tastings")
+          .insert({ wine_id: newWine.id, tasted_on: tastedOn || null, notes: notes.trim() || null })
+          .select("id").single();
+        if (te) return alert(te.message);
+        savedTastingId = td.id;
+      }
+
+      if (photosSnapshot.length > 0) {
+        setUploading(true);
+        const tastingId = hasTasting ? savedTastingId : null;
+        for (const photo of photosSnapshot) {
+          await savePendingPhoto(newWine.id, tastingId, photo, userId);
+        }
+        setUploading(false);
       }
 
       location.href = `/wines/${newWine.id}`;
     } catch (error) {
       console.error(error);
-      const message = error instanceof Error ? error.message : "Failed to save wine.";
-      alert(message);
+      alert(error instanceof Error ? error.message : "Failed to save wine.");
     }
   }
 
@@ -376,7 +512,14 @@ export default function AddWinePage() {
     <PageShell>
       <PageContainer className="max-w-2xl">
         <PageHero>
-          <Eyebrow>Add Wine</Eyebrow>
+          <Eyebrow>
+            <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
+              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3">
+                <path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Cancel
+            </Link>
+          </Eyebrow>
           <PageTitle>Log a new bottle to your cellar</PageTitle>
           <PageIntro>
             Fill in what you know — leave unknown fields as NA. You can add more notes and photos after saving.
@@ -422,8 +565,7 @@ export default function AddWinePage() {
                           </div>
                           <div className="mt-0.5 text-xs text-stone-500">
                             {[wine.producers?.name, wine.countries?.name, wine.regions?.name, wine.subregions?.name]
-                              .filter(Boolean)
-                              .join(" · ")}
+                              .filter(Boolean).join(" · ")}
                           </div>
                         </button>
                       </li>
@@ -449,11 +591,7 @@ export default function AddWinePage() {
                 onChange={setCountry}
                 placeholder="e.g. France"
                 fetchSuggestions={async (q) => {
-                  const { data } = await supabase
-                    .from("countries")
-                    .select("name")
-                    .ilike("name", `%${q}%`)
-                    .limit(8);
+                  const { data } = await supabase.from("countries").select("name").ilike("name", `%${q}%`).limit(8);
                   return data?.map((d) => d.name) ?? [];
                 }}
               />
@@ -464,6 +602,7 @@ export default function AddWinePage() {
               <AutocompleteInput
                 value={region}
                 onChange={setRegion}
+                onSelect={autofillFromRegion}
                 placeholder="e.g. Burgundy"
                 fetchSuggestions={async (q) => {
                   const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
@@ -483,6 +622,7 @@ export default function AddWinePage() {
               <AutocompleteInput
                 value={subregion}
                 onChange={setSubregion}
+                onSelect={autofillFromSubregion}
                 placeholder="e.g. Côte de Nuits"
                 fetchSuggestions={async (q) => {
                   const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
@@ -510,11 +650,7 @@ export default function AddWinePage() {
                 onChange={setGrapes}
                 placeholder="e.g. Cabernet Sauvignon"
                 fetchSuggestions={async (q) => {
-                  const { data } = await supabase
-                    .from("grapes")
-                    .select("name")
-                    .ilike("name", `%${q}%`)
-                    .limit(8);
+                  const { data } = await supabase.from("grapes").select("name").ilike("name", `%${q}%`).limit(8);
                   return data?.map((d) => d.name) ?? [];
                 }}
               />
@@ -525,18 +661,28 @@ export default function AddWinePage() {
               <AutocompleteInput
                 value={producer}
                 onChange={setProducer}
+                onSelect={autofillFromProducer}
                 placeholder="e.g. Domaine de la Romanée-Conti"
                 fetchSuggestions={async (q) => {
-                  const { data } = await supabase
-                    .from("producers")
-                    .select("name")
-                    .ilike("name", `%${q}%`)
-                    .limit(8);
+                  let qb = supabase.from("producers").select("name").ilike("name", `%${q}%`);
+                  const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
+                  if (regionName) {
+                    const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
+                    let regionQuery = supabase.from("regions").select("id").eq("name", regionName);
+                    if (countryName) {
+                      const { data: countryRow } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
+                      if (countryRow?.id) regionQuery = regionQuery.eq("country_id", countryRow.id);
+                    }
+                    const { data: regionRow } = await regionQuery.maybeSingle();
+                    if (regionRow?.id) qb = qb.eq("region_id", regionRow.id);
+                  }
+                  const { data } = await qb.limit(8);
                   return data?.map((d) => d.name) ?? [];
                 }}
               />
             </Field>
 
+            {/* ── First Tasting Note ────────────────────────────────────────── */}
             <div className="border-t border-stone-200 pt-5">
               <CardTitle className="text-xl">First Tasting Note</CardTitle>
               <CardDescription className="mt-2">Optional, but useful if you are entering a bottle after tasting it.</CardDescription>
@@ -556,11 +702,25 @@ export default function AddWinePage() {
                     onChange={(e) => setNotes(e.target.value)}
                   />
                 </Field>
+
+                <Field>
+                  <FieldLabel>Photos</FieldLabel>
+                  <PhotoPicker
+                    onChange={setPendingPhotos}
+                    hintText={
+                      tastedOn || notes.trim()
+                        ? "Attached to this tasting note."
+                        : "Will be saved as general wine photos (no tasting note filled in)."
+                    }
+                  />
+                </Field>
               </div>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 pt-2">
-              <Button onClick={saveWine}>Save Wine</Button>
+              <Button onClick={saveWine} disabled={uploading}>
+                {uploading ? "Uploading photos…" : "Save Wine"}
+              </Button>
             </div>
           </div>
         </Card>

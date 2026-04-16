@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 type Props = {
   value: string;
   onChange: (v: string) => void;
+  onSelect?: (v: string) => void;
   placeholder?: string;
   fetchSuggestions: (query: string) => Promise<string[]>;
 };
@@ -14,6 +15,7 @@ type Props = {
 export default function AutocompleteInput({
   value,
   onChange,
+  onSelect,
   placeholder,
   fetchSuggestions,
 }: Props) {
@@ -57,6 +59,7 @@ export default function AutocompleteInput({
 
   function select(s: string) {
     onChange(s);
+    onSelect?.(s);
     setSuggestions([]);
     setOpen(false);
   }

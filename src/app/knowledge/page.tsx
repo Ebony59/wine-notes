@@ -1,8 +1,10 @@
 "use client";
 
 import Fuse from "fuse.js";
+import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import SearchableSelect from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -48,6 +50,8 @@ type Grape = {
 type Producer = {
   id: number;
   name: string;
+  region_id: number | null;
+  regions: { name: string } | null;
   notes: string | null;
 };
 
@@ -65,14 +69,47 @@ type LookupSectionProps = {
   onRename: (item: { id: number; label: string }) => Promise<void>;
   onDelete: (item: { id: number; label: string }) => Promise<void>;
   onSaveNote: (item: { id: number }, notes: string) => Promise<void>;
+  getItemHref?: (item: LookupItem) => string;
+  onAdd?: (name: string) => Promise<void>;
+  addExtra?: (name: string) => React.ReactNode;
+};
+
+type ProducerGroup = {
+  label: string;
+  items: Producer[];
+};
+
+type ProducerKnowledgeCardProps = {
+  producers: Producer[];
+  groups: ProducerGroup[];
+  regionsById: Map<number, Region>;
+  onRename: (item: { id: number; label: string }) => Promise<void>;
+  onDelete: (item: { id: number; label: string }) => Promise<void>;
+  onSaveNote: (item: { id: number }, notes: string) => Promise<void>;
+  onReassignRegion: (item: Producer) => void;
+  onAdd: (name: string) => Promise<void>;
+  addExtra: () => React.ReactNode;
 };
 
 // ── LookupSection component ────────────────────────────────────────────────────
 
-function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote }: LookupSectionProps) {
+function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote, getItemHref, onAdd, addExtra }: LookupSectionProps) {
   const [query, setQuery] = useState("");
   const [noteEditId, setNoteEditId] = useState<number | null>(null);
   const [noteEditText, setNoteEditText] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+
+  async function commitAdd() {
+    const name = addName.trim();
+    if (!name || !onAdd) return;
+    setAddBusy(true);
+    await onAdd(name);
+    setAddBusy(false);
+    setAddName("");
+    setAdding(false);
+  }
 
   const fuse = useMemo(
     () => new Fuse(items, { keys: ["label", "detail"], threshold: 0.35, ignoreLocation: true }),
@@ -99,12 +136,57 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
     <Card className="border-stone-300/80">
       <div className="flex items-center justify-between gap-3">
         <h2 className="text-base font-semibold text-stone-900">{title}</h2>
-        <Badge>{String(items.length)}</Badge>
+        <div className="flex items-center gap-2">
+          <Badge>{String(items.length)}</Badge>
+          {onAdd && !adding && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-stone-300 text-stone-500 transition hover:border-stone-500 hover:bg-white hover:text-stone-800"
+              aria-label={`Add ${title.toLowerCase()}`}
+            >
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+          )}
+        </div>
       </div>
 
-      {items.length === 0 ? (
+      {adding && (
+        <div className="mt-4 space-y-2 rounded-2xl border border-stone-200 bg-stone-50 p-3">
+          <input
+            autoFocus
+            className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none placeholder:text-stone-500 focus:border-stone-500"
+            placeholder={`New ${title.slice(0, -1).toLowerCase()} name…`}
+            value={addName}
+            onChange={(e) => setAddName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commitAdd(); if (e.key === "Escape") { setAdding(false); setAddName(""); } }}
+          />
+          {addExtra?.(addName)}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={commitAdd}
+              disabled={addBusy || !addName.trim()}
+              className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              {addBusy ? "Saving…" : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setAddName(""); }}
+              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 && !adding ? (
         <p className="mt-4 text-sm text-stone-500">{emptyText}</p>
-      ) : (
+      ) : items.length > 0 ? (
         <>
           <div className="mt-4">
             <Input
@@ -126,7 +208,16 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
                 >
                   <div className="flex items-start justify-between gap-3">
                     <div>
-                      <div className="text-sm font-medium text-stone-900">{item.label}</div>
+                      {getItemHref ? (
+                        <Link
+                          href={getItemHref(item)}
+                          className="text-sm font-medium text-stone-900 underline-offset-2 hover:underline"
+                        >
+                          {item.label}
+                        </Link>
+                      ) : (
+                        <div className="text-sm font-medium text-stone-900">{item.label}</div>
+                      )}
                       {item.detail ? (
                         <div className="mt-0.5 text-xs text-stone-500">{item.detail}</div>
                       ) : null}
@@ -194,6 +285,247 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
             </div>
           )}
         </>
+      ) : null}
+    </Card>
+  );
+}
+
+function ProducerKnowledgeCard({
+  producers,
+  groups,
+  regionsById,
+  onRename,
+  onDelete,
+  onSaveNote,
+  onReassignRegion,
+  onAdd,
+  addExtra,
+}: ProducerKnowledgeCardProps) {
+  const [query, setQuery] = useState("");
+  const [regionQueries, setRegionQueries] = useState<Record<string, string>>({});
+  const [noteEditId, setNoteEditId] = useState<number | null>(null);
+  const [noteEditText, setNoteEditText] = useState("");
+  const [adding, setAdding] = useState(false);
+  const [addName, setAddName] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+
+  async function commitAdd() {
+    const name = addName.trim();
+    if (!name) return;
+    setAddBusy(true);
+    await onAdd(name);
+    setAddBusy(false);
+    setAddName("");
+    setAdding(false);
+  }
+
+  function openNoteEdit(item: Producer) {
+    setNoteEditId(item.id);
+    setNoteEditText(item.notes ?? "");
+  }
+
+  async function commitNote(item: Producer) {
+    await onSaveNote(item, noteEditText);
+    setNoteEditId(null);
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const visibleGroups = groups
+    .map((group) => {
+      const normalizedRegionQuery = (regionQueries[group.label] ?? "").trim().toLowerCase();
+      const items = group.items.filter((producer) => {
+        const matchesGlobal =
+          !normalizedQuery ||
+          producer.name.toLowerCase().includes(normalizedQuery) ||
+          group.label.toLowerCase().includes(normalizedQuery);
+        const matchesRegion = !normalizedRegionQuery || producer.name.toLowerCase().includes(normalizedRegionQuery);
+        return matchesGlobal && matchesRegion;
+      });
+
+      return { ...group, items };
+    })
+    .filter((group) => group.items.length > 0 || group.label.toLowerCase().includes(normalizedQuery));
+
+  return (
+    <Card className="border-stone-300/80">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-stone-900">Producers</h2>
+        <div className="flex items-center gap-2">
+          <Badge>{String(producers.length)}</Badge>
+          {!adding && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-stone-300 text-stone-500 transition hover:border-stone-500 hover:bg-white hover:text-stone-800"
+              aria-label="Add producers"
+            >
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {adding && (
+        <div className="mt-4 space-y-2 rounded-2xl border border-stone-200 bg-stone-50 p-3">
+          <input
+            autoFocus
+            className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-900 outline-none placeholder:text-stone-500 focus:border-stone-500"
+            placeholder="New producer name…"
+            value={addName}
+            onChange={(e) => setAddName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") commitAdd(); if (e.key === "Escape") { setAdding(false); setAddName(""); } }}
+          />
+          {addExtra()}
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={commitAdd}
+              disabled={addBusy || !addName.trim()}
+              className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              {addBusy ? "Saving…" : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setAdding(false); setAddName(""); }}
+              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      <div className="mt-4">
+        <Input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search producers..."
+        />
+      </div>
+
+      {visibleGroups.length === 0 ? (
+        <p className="mt-4 text-sm text-stone-500">No producers match the current search.</p>
+      ) : (
+        <div className="mt-4 max-h-[44rem] space-y-4 overflow-y-auto pr-1">
+          {visibleGroups.map((group) => (
+            <div key={group.label} className="rounded-[24px] border border-stone-200 bg-stone-50/70 p-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-stone-900">{group.label}</div>
+                  <div className="mt-0.5 text-xs text-stone-500">
+                    {group.label === "Unknown" ? "Producers without a linked region" : `${group.items.length} producer${group.items.length === 1 ? "" : "s"}`}
+                  </div>
+                </div>
+                <Badge>{String(group.items.length)}</Badge>
+              </div>
+
+              <div className="mt-3">
+                <Input
+                  type="search"
+                  value={regionQueries[group.label] ?? ""}
+                  onChange={(e) => setRegionQueries((current) => ({ ...current, [group.label]: e.target.value }))}
+                  placeholder={`Search in ${group.label}`}
+                />
+              </div>
+
+              <div className="mt-3 max-h-64 space-y-3 overflow-y-auto pr-1">
+                {group.items.map((producer) => {
+                  const linkedRegion = producer.region_id ? (regionsById.get(producer.region_id) ?? null) : null;
+                  const detail = linkedRegion
+                    ? linkedRegion.countries?.name
+                      ? `${linkedRegion.name} · ${linkedRegion.countries.name}`
+                      : linkedRegion.name
+                    : "Unknown";
+
+                  return (
+                    <div key={producer.id} className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <Link
+                            href={`/knowledge/producers/${producer.id}`}
+                            className="text-sm font-medium text-stone-900 underline-offset-2 hover:underline"
+                          >
+                            {producer.name}
+                          </Link>
+                          <div className="mt-0.5 text-xs text-stone-500">{detail}</div>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onReassignRegion(producer)}
+                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+                          >
+                            Set region
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onRename({ id: producer.id, label: producer.name })}
+                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+                          >
+                            Rename
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => onDelete({ id: producer.id, label: producer.name })}
+                            className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      </div>
+
+                      {noteEditId === producer.id ? (
+                        <div className="mt-3 space-y-2">
+                          <textarea
+                            rows={3}
+                            className="w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400"
+                            placeholder={`Notes about ${producer.name}…`}
+                            value={noteEditText}
+                            onChange={(e) => setNoteEditText(e.target.value)}
+                          />
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => commitNote(producer)}
+                              className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700"
+                            >
+                              Save
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setNoteEditId(null)}
+                              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="mt-2">
+                          {producer.notes ? (
+                            <p className="whitespace-pre-wrap text-xs leading-relaxed text-stone-600">{producer.notes}</p>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => openNoteEdit(producer)}
+                            className="mt-1 text-xs text-stone-400 underline underline-offset-2 transition hover:text-stone-600"
+                          >
+                            {producer.notes ? "Edit note" : "+ Add note"}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );
@@ -209,6 +541,12 @@ export default function KnowledgePage() {
   const [grapes, setGrapes] = useState<Grape[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
+  const [regionModalProducer, setRegionModalProducer] = useState<Producer | null>(null);
+  const [regionModalValue, setRegionModalValue] = useState("");
+  const [savingProducerRegion, setSavingProducerRegion] = useState(false);
+  const [modalNewRegionName, setModalNewRegionName] = useState("");
+  const [modalNewRegionCountry, setModalNewRegionCountry] = useState("");
+  const [addingModalRegion, setAddingModalRegion] = useState(false);
 
   const loadLookups = useCallback(async () => {
     const [countryRes, regionRes, subregionRes, grapeRes, producerRes] = await Promise.all([
@@ -216,7 +554,7 @@ export default function KnowledgePage() {
       supabase.from("regions").select("id,name,country_id,notes,countries(name)").order("name"),
       supabase.from("subregions").select("id,name,region_id,notes,regions(name)").order("name"),
       supabase.from("grapes").select("id,name,notes").order("name"),
-      supabase.from("producers").select("id,name,notes").order("name"),
+      supabase.from("producers").select("id,name,region_id,notes,regions(name)").order("name"),
     ]);
 
     if (countryRes.error) alert(countryRes.error.message);
@@ -439,8 +777,119 @@ export default function KnowledgePage() {
     await loadLookups();
   }
 
+  function openProducerRegionModal(item: Producer) {
+    const currentRegion = item.region_id ? (regions.find((region) => region.id === item.region_id) ?? null) : null;
+    setRegionModalProducer(item);
+    setRegionModalValue(currentRegion ? formatRegionOption(currentRegion) : "");
+    setModalNewRegionName("");
+    setModalNewRegionCountry(currentRegion?.countries?.name ?? "");
+  }
+
+  function closeProducerRegionModal() {
+    if (savingProducerRegion || addingModalRegion) return;
+    setRegionModalProducer(null);
+    setRegionModalValue("");
+    setModalNewRegionName("");
+    setModalNewRegionCountry("");
+  }
+
+  async function saveProducerRegionAssignment() {
+    if (!regionModalProducer) return;
+
+    const nextRegion = regionOptionMap.get(regionModalValue) ?? null;
+    setSavingProducerRegion(true);
+    setBusyKey(`producer-region-${regionModalProducer.id}`);
+    const { error } = await supabase
+      .from("producers")
+      .update({ region_id: nextRegion?.id ?? null })
+      .eq("id", regionModalProducer.id);
+    setBusyKey(null);
+    setSavingProducerRegion(false);
+    if (error) return alert(error.message);
+    await loadLookups();
+    closeProducerRegionModal();
+  }
+
+  async function addRegionFromModal() {
+    const name = modalNewRegionName.trim();
+    if (!name) return;
+
+    setAddingModalRegion(true);
+    const country = countries.find((entry) => entry.name === modalNewRegionCountry);
+    const { data, error } = await supabase
+      .from("regions")
+      .insert({ name, country_id: country?.id ?? null })
+      .select("id,name,country_id,countries(name),notes")
+      .single();
+    setAddingModalRegion(false);
+    if (error) return alert(error.message);
+
+    const insertedRegion = data as unknown as Region;
+    await loadLookups();
+    setRegionModalValue(formatRegionOption(insertedRegion));
+    setModalNewRegionName("");
+  }
+
+  // ── Add handlers ───────────────────────────────────────────────────────────
+
+  const [newRegionCountry, setNewRegionCountry] = useState("");
+  const [newSubregionRegion, setNewSubregionRegion] = useState("");
+  const [newProducerCountry, setNewProducerCountry] = useState("");
+  const [newProducerRegion, setNewProducerRegion] = useState("");
+
+  async function addCountry(name: string) {
+    const { error } = await supabase.from("countries").insert({ name });
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function addRegion(name: string) {
+    const country = countries.find((c) => c.name === newRegionCountry);
+    const { error } = await supabase
+      .from("regions")
+      .insert({ name, country_id: country?.id ?? null });
+    if (error) return alert(error.message);
+    setNewRegionCountry("");
+    await loadLookups();
+  }
+
+  async function addSubregion(name: string) {
+    const region = regions.find((r) => r.name === newSubregionRegion);
+    const { error } = await supabase
+      .from("subregions")
+      .insert({ name, region_id: region?.id ?? null });
+    if (error) return alert(error.message);
+    setNewSubregionRegion("");
+    await loadLookups();
+  }
+
+  async function addGrape(name: string) {
+    const { error } = await supabase.from("grapes").insert({ name });
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function addProducer(name: string) {
+    const country = countries.find((entry) => entry.name === newProducerCountry);
+    const region = regions.find((entry) => {
+      if (entry.name !== newProducerRegion) return false;
+      if (!country) return true;
+      return entry.country_id === country.id;
+    });
+
+    const { error } = await supabase.from("producers").insert({ name, region_id: region?.id ?? null });
+    if (error) return alert(error.message);
+    setNewProducerCountry("");
+    setNewProducerRegion("");
+    await loadLookups();
+  }
+
   // ── Derived items ──────────────────────────────────────────────────────────
 
+  const regionLookup = new Map(regions.map((region) => [region.id, region] as const));
+  const sortedRegions = regions.slice().sort((a, b) => formatRegionOption(a).localeCompare(formatRegionOption(b)));
+  const regionOptions = sortedRegions.map((region) => formatRegionOption(region));
+  const regionOptionMap = new Map(sortedRegions.map((region) => [formatRegionOption(region), region] as const));
   const countryItems = countries.map((c) => ({ id: c.id, label: c.name, notes: c.notes }));
   const regionItems = regions.map((r) => ({
     id: r.id,
@@ -455,7 +904,30 @@ export default function KnowledgePage() {
     notes: s.notes,
   }));
   const grapeItems = grapes.map((g) => ({ id: g.id, label: g.name, notes: g.notes }));
-  const producerItems = producers.map((p) => ({ id: p.id, label: p.name, notes: p.notes }));
+  const groupedProducerItems = Array.from(
+    producers.reduce((map, producer) => {
+      const linkedRegion = producer.region_id ? (regionLookup.get(producer.region_id) ?? null) : null;
+      const groupLabel = linkedRegion
+        ? linkedRegion.countries?.name
+          ? `${linkedRegion.name} · ${linkedRegion.countries.name}`
+          : linkedRegion.name
+        : "Unknown";
+
+      const nextItems = map.get(groupLabel) ?? [];
+      nextItems.push(producer);
+      map.set(groupLabel, nextItems);
+      return map;
+    }, new Map<string, Producer[]>()).entries()
+  )
+    .sort(([left], [right]) => {
+      if (left === "Unknown") return 1;
+      if (right === "Unknown") return -1;
+      return left.localeCompare(right);
+    })
+    .map(([label, items]) => ({
+      label,
+      items: items.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
@@ -486,6 +958,7 @@ export default function KnowledgePage() {
             onRename={renameCountry}
             onDelete={deleteCountry}
             onSaveNote={saveCountryNote}
+            onAdd={addCountry}
           />
           <LookupSection
             title="Regions"
@@ -494,6 +967,17 @@ export default function KnowledgePage() {
             onRename={renameRegion}
             onDelete={deleteRegion}
             onSaveNote={saveRegionNote}
+            onAdd={addRegion}
+            addExtra={() => (
+              <select
+                className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-500"
+                value={newRegionCountry}
+                onChange={(e) => setNewRegionCountry(e.target.value)}
+              >
+                <option value="">Country (optional)</option>
+                {countries.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+              </select>
+            )}
           />
           <LookupSection
             title="Sub-regions"
@@ -502,6 +986,17 @@ export default function KnowledgePage() {
             onRename={renameSubregion}
             onDelete={deleteSubregion}
             onSaveNote={saveSubregionNote}
+            onAdd={addSubregion}
+            addExtra={() => (
+              <select
+                className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-500"
+                value={newSubregionRegion}
+                onChange={(e) => setNewSubregionRegion(e.target.value)}
+              >
+                <option value="">Region (optional)</option>
+                {regions.map((r) => <option key={r.id} value={r.name}>{r.name}</option>)}
+              </select>
+            )}
           />
           <LookupSection
             title="Grapes"
@@ -510,19 +1005,148 @@ export default function KnowledgePage() {
             onRename={renameGrape}
             onDelete={deleteGrape}
             onSaveNote={saveGrapeNote}
+            onAdd={addGrape}
           />
           <div className="lg:col-span-2">
-            <LookupSection
-              title="Producers"
-              emptyText="No producers yet."
-              items={producerItems}
+            <ProducerKnowledgeCard
+              producers={producers}
+              groups={groupedProducerItems}
+              regionsById={regionLookup}
               onRename={renameProducer}
               onDelete={deleteProducer}
               onSaveNote={saveProducerNote}
+              onReassignRegion={openProducerRegionModal}
+              onAdd={addProducer}
+              addExtra={() => (
+                <div className="space-y-2">
+                  <select
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-500"
+                    value={newProducerCountry}
+                    onChange={(e) => {
+                      setNewProducerCountry(e.target.value);
+                      setNewProducerRegion("");
+                    }}
+                  >
+                    <option value="">Country (optional)</option>
+                    {countries.map((country) => <option key={country.id} value={country.name}>{country.name}</option>)}
+                  </select>
+                  <select
+                    className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-500"
+                    value={newProducerRegion}
+                    onChange={(e) => setNewProducerRegion(e.target.value)}
+                  >
+                    <option value="">Region (optional)</option>
+                    {regions
+                      .filter((region) => !newProducerCountry || region.countries?.name === newProducerCountry)
+                      .map((region) => (
+                        <option key={region.id} value={region.name}>
+                          {region.countries?.name ? `${region.name} (${region.countries.name})` : region.name}
+                        </option>
+                      ))}
+                  </select>
+                </div>
+              )}
             />
           </div>
         </div>
       </PageContainer>
+
+      {regionModalProducer && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4 backdrop-blur-sm"
+          onClick={closeProducerRegionModal}
+        >
+          <div
+            className="w-full max-w-lg rounded-[28px] border border-stone-200 bg-white/95 p-6 shadow-[0_24px_60px_rgba(88,56,34,0.18)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <p className="font-serif text-2xl text-stone-900">Set Producer Region</p>
+                <p className="mt-2 text-sm text-stone-600">
+                  Link <span className="font-medium text-stone-800">{regionModalProducer.name}</span> to an existing region, or add a new one here.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={closeProducerRegionModal}
+                className="flex h-8 w-8 items-center justify-center rounded-full border border-stone-200 text-stone-500 transition hover:border-stone-400 hover:text-stone-800"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="mt-5 space-y-4">
+              <div>
+                <label className="mb-1 block text-xs text-stone-600">Region</label>
+                <SearchableSelect
+                  value={regionModalValue}
+                  onChange={setRegionModalValue}
+                  options={regionOptions}
+                  placeholder="Search regions"
+                  allLabel="Unknown"
+                />
+              </div>
+
+              <div className="rounded-[24px] border border-stone-200 bg-stone-50/80 p-4">
+                <div className="text-sm font-medium text-stone-800">Add a New Region</div>
+                <div className="mt-3 space-y-3">
+                  <Input
+                    value={modalNewRegionName}
+                    onChange={(e) => setModalNewRegionName(e.target.value)}
+                    placeholder="New region name"
+                  />
+                  <select
+                    className="w-full rounded-2xl border border-stone-300 bg-white px-4 py-3 text-sm text-stone-700 outline-none focus:border-stone-500"
+                    value={modalNewRegionCountry}
+                    onChange={(e) => setModalNewRegionCountry(e.target.value)}
+                  >
+                    <option value="">Country (optional)</option>
+                    {countries.map((country) => (
+                      <option key={country.id} value={country.name}>
+                        {country.name}
+                      </option>
+                    ))}
+                  </select>
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={addRegionFromModal}
+                      disabled={addingModalRegion || !modalNewRegionName.trim()}
+                      className="rounded-full border border-stone-300 px-4 py-2 text-sm text-stone-700 transition hover:border-stone-500 hover:bg-white disabled:opacity-50"
+                    >
+                      {addingModalRegion ? "Adding…" : "Add Region"}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={closeProducerRegionModal}
+                className="rounded-full border border-stone-300 px-4 py-2 text-sm text-stone-700 transition hover:bg-white"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={saveProducerRegionAssignment}
+                disabled={savingProducerRegion}
+                className="rounded-full bg-stone-900 px-4 py-2 text-sm text-white transition hover:bg-stone-700 disabled:opacity-50"
+              >
+                {savingProducerRegion ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
+}
+
+function formatRegionOption(region: Region) {
+  return region.countries?.name ? `${region.name} (${region.countries.name})` : region.name;
 }

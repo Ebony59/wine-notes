@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import TagAutocompleteInput from "@/components/TagAutocompleteInput";
 import { Button } from "@/components/ui/button";
@@ -108,6 +109,136 @@ export default function EditWinePage() {
     }
   }, [supabase, id]);
 
+  useEffect(() => {
+    const regionName = normalizeField(region);
+    if (!regionName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findRegionHierarchy(supabase, regionName, normalizeField(country));
+        if (!cancelled && match?.countryName && match.countryName !== country) {
+          setCountry(match.countryName);
+        }
+      } catch (error) {
+        console.error("Failed to autofill country from region", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, region, supabase]);
+
+  useEffect(() => {
+    const subregionName = normalizeField(subregion);
+    if (!subregionName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findSubregionHierarchy(
+          supabase,
+          subregionName,
+          normalizeField(region),
+          normalizeField(country),
+        );
+
+        if (cancelled || !match) return;
+        if (match.regionName !== region) setRegion(match.regionName);
+        if (match.countryName && match.countryName !== country) setCountry(match.countryName);
+      } catch (error) {
+        console.error("Failed to autofill parent regions from sub-region", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, region, subregion, supabase]);
+
+  useEffect(() => {
+    const producerName = normalizeField(producer);
+    if (!producerName) return;
+
+    let cancelled = false;
+    const timeoutId = window.setTimeout(async () => {
+      try {
+        const match = await findProducerHierarchy(
+          supabase,
+          producerName,
+          normalizeField(region),
+          normalizeField(country),
+        );
+
+        if (cancelled || !match) return;
+        if (match.regionName && match.regionName !== region) setRegion(match.regionName);
+        if (match.countryName && match.countryName !== country) setCountry(match.countryName);
+      } catch (error) {
+        console.error("Failed to autofill location from producer", error);
+      }
+    }, 250);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+    };
+  }, [country, producer, region, supabase]);
+
+  async function autofillFromRegion(regionName: string) {
+    const normalizedRegion = normalizeField(regionName);
+    if (!normalizedRegion) return;
+
+    try {
+      const match = await findRegionHierarchy(supabase, normalizedRegion, normalizeField(country));
+      if (match?.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill country from region selection", error);
+    }
+  }
+
+  async function autofillFromSubregion(subregionName: string) {
+    const normalizedSubregion = normalizeField(subregionName);
+    if (!normalizedSubregion) return;
+
+    try {
+      const match = await findSubregionHierarchy(
+        supabase,
+        normalizedSubregion,
+        normalizeField(region),
+        normalizeField(country),
+      );
+
+      if (!match) return;
+      setRegion(match.regionName);
+      if (match.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill parent regions from sub-region selection", error);
+    }
+  }
+
+  async function autofillFromProducer(producerName: string) {
+    const normalizedProducer = normalizeField(producerName);
+    if (!normalizedProducer) return;
+
+    try {
+      const match = await findProducerHierarchy(
+        supabase,
+        normalizedProducer,
+        normalizeField(region),
+        normalizeField(country),
+      );
+
+      if (!match) return;
+      if (match.regionName) setRegion(match.regionName);
+      if (match.countryName) setCountry(match.countryName);
+    } catch (error) {
+      console.error("Failed to autofill location from producer selection", error);
+    }
+  }
+
   // Lookup-table helpers (same as add-wine page)
   async function ensureCountryId(n: string): Promise<number> {
     const { data: ex } = await supabase.from("countries").select("id").eq("name", n).maybeSingle();
@@ -133,10 +264,17 @@ export default function EditWinePage() {
     return ins.id;
   }
 
-  async function ensureProducerId(n: string): Promise<number> {
-    const { data: ex } = await supabase.from("producers").select("id").eq("name", n).maybeSingle();
-    if (ex?.id) return ex.id;
-    const { data: ins, error } = await supabase.from("producers").insert({ name: n }).select("id").single();
+  async function ensureProducerId(n: string, regionId: number | null): Promise<number> {
+    const { data: ex, error: selectError } = await supabase.from("producers").select("id,region_id").eq("name", n).maybeSingle();
+    if (selectError) throw selectError;
+    if (ex?.id) {
+      if (ex.region_id === null && regionId !== null) {
+        const { error: updateError } = await supabase.from("producers").update({ region_id: regionId }).eq("id", ex.id);
+        if (updateError) throw updateError;
+      }
+      return ex.id;
+    }
+    const { data: ins, error } = await supabase.from("producers").insert({ name: n, region_id: regionId }).select("id").single();
     if (error) throw error;
     return ins.id;
   }
@@ -185,7 +323,7 @@ export default function EditWinePage() {
       if (countryName) country_id = await ensureCountryId(countryName);
       if (regionName && country_id) region_id = await ensureRegionId(country_id, regionName);
       if (subregionName && region_id) subregion_id = await ensureSubregionId(region_id, subregionName);
-      if (producerName) producer_id = await ensureProducerId(producerName);
+      if (producerName) producer_id = await ensureProducerId(producerName, region_id);
 
       const { error } = await supabase
         .from("wines")
@@ -283,6 +421,7 @@ export default function EditWinePage() {
             <AutocompleteInput
               value={region}
               onChange={setRegion}
+              onSelect={autofillFromRegion}
               fetchSuggestions={async (q) => {
                 const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
                 let qb = supabase.from("regions").select("name").ilike("name", `%${q}%`);
@@ -301,6 +440,7 @@ export default function EditWinePage() {
             <AutocompleteInput
               value={subregion}
               onChange={setSubregion}
+              onSelect={autofillFromSubregion}
               fetchSuggestions={async (q) => {
                 const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
                 let qb = supabase.from("subregions").select("name").ilike("name", `%${q}%`);
@@ -342,12 +482,24 @@ export default function EditWinePage() {
             <AutocompleteInput
               value={producer}
               onChange={setProducer}
+              onSelect={autofillFromProducer}
               fetchSuggestions={async (q) => {
-                const { data } = await supabase
+                let qb = supabase
                   .from("producers")
                   .select("name")
-                  .ilike("name", `%${q}%`)
-                  .limit(8);
+                  .ilike("name", `%${q}%`);
+                const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
+                if (regionName) {
+                  const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
+                  let regionQuery = supabase.from("regions").select("id").eq("name", regionName);
+                  if (countryName) {
+                    const { data: countryRow } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
+                    if (countryRow?.id) regionQuery = regionQuery.eq("country_id", countryRow.id);
+                  }
+                  const { data: regionRow } = await regionQuery.maybeSingle();
+                  if (regionRow?.id) qb = qb.eq("region_id", regionRow.id);
+                }
+                const { data } = await qb.limit(8);
                 return data?.map((d) => d.name) ?? [];
               }}
             />

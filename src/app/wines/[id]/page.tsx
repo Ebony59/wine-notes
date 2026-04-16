@@ -4,6 +4,8 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { PhotoPicker } from "@/components/PhotoPicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -18,88 +20,6 @@ import {
   PageTitle,
 } from "@/components/ui/page-shell";
 
-type DetectedImageFormat = "heic" | "jpeg" | "png" | "gif" | "webp" | "unknown";
-type HeicConverter = (options: { blob: Blob; type: string; quality: number }) => Promise<Blob | Blob[]>;
-type HeicModule = { heicTo?: HeicConverter; default?: HeicConverter };
-
-async function detectImageFormat(file: File): Promise<DetectedImageFormat> {
-  const header = new Uint8Array(await file.slice(0, 32).arrayBuffer());
-  const ascii = Array.from(header, byte => String.fromCharCode(byte)).join("");
-
-  if (header[0] === 0xff && header[1] === 0xd8 && header[2] === 0xff) return "jpeg";
-  if (
-    header[0] === 0x89 &&
-    header[1] === 0x50 &&
-    header[2] === 0x4e &&
-    header[3] === 0x47
-  ) return "png";
-  if (ascii.startsWith("GIF8")) return "gif";
-  if (ascii.startsWith("RIFF") && ascii.slice(8, 12) === "WEBP") return "webp";
-
-  const brand = ascii.slice(8, 12);
-  if (
-    ascii.slice(4, 8) === "ftyp" &&
-    ["heic", "heix", "hevc", "hevx", "heim", "heis", "mif1", "msf1"].includes(brand)
-  ) {
-    return "heic";
-  }
-
-  return "unknown";
-}
-
-async function convertIfNeeded(file: File): Promise<File> {
-  const detectedFormat = await detectImageFormat(file);
-  const looksLikeHeic =
-    file.type === "image/heic" ||
-    file.type === "image/heif" ||
-    /\.heic$/i.test(file.name) ||
-    /\.heif$/i.test(file.name);
-
-  if (detectedFormat !== "heic") {
-    // Some device/share targets preserve a .heic name even when the payload is already JPEG/PNG.
-    // In that case, skip conversion and upload the bytes we actually have.
-    if (looksLikeHeic && detectedFormat === "jpeg") {
-      return new File([file], file.name.replace(/\.hei[cf]$/i, ".jpg"), { type: "image/jpeg" });
-    }
-    if (looksLikeHeic && detectedFormat === "png") {
-      return new File([file], file.name.replace(/\.hei[cf]$/i, ".png"), { type: "image/png" });
-    }
-    return file;
-  }
-
-  const jpegName = file.name.replace(/\.hei[cf]$/i, ".jpg");
-
-  // Stage 1: native canvas decode — works on Safari (which supports HEIC natively)
-  try {
-    const bitmap = await createImageBitmap(file);
-    const canvas = document.createElement("canvas");
-    canvas.width = bitmap.width;
-    canvas.height = bitmap.height;
-    canvas.getContext("2d")!.drawImage(bitmap, 0, 0);
-    bitmap.close();
-    const blob = await new Promise<Blob>((resolve, reject) =>
-      canvas.toBlob(b => b ? resolve(b) : reject(new Error("Canvas toBlob failed")), "image/jpeg", 0.85)
-    );
-    return new File([blob], jpegName, { type: "image/jpeg" });
-  } catch {
-    // Browser can't natively decode HEIC — fall through to the bundled decoder
-  }
-
-  // Stage 2: heic-to ships a newer libheif build than heic2any.
-  const mod = (await import("heic-to")) as unknown as HeicModule;
-  const converter =
-    typeof mod.heicTo === "function"
-      ? mod.heicTo
-      : typeof mod.default === "function"
-        ? mod.default
-        : null;
-  if (!converter) {
-    throw new Error("HEIC converter failed to load");
-  }
-  const result = await converter({ blob: file, type: "image/jpeg", quality: 0.85 });
-  const blob = Array.isArray(result) ? result[0] : result;
-  return new File([blob], jpegName, { type: "image/jpeg" });
-}
 
 type Wine = {
   id: string;
@@ -169,6 +89,7 @@ export default function WineDetailPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [addDate, setAddDate] = useState("");
   const [addNotes, setAddNotes] = useState("");
+  const [addTastingPhotos, setAddTastingPhotos] = useState<PendingPhoto[]>([]);
 
   // Edit tasting
   const [editId, setEditId] = useState<string | null>(null);
@@ -179,6 +100,7 @@ export default function WineDetailPage() {
   const [photoTarget, setPhotoTarget] = useState<string | null>(null);
   const [photoUrl, setPhotoUrl] = useState("");
   const [uploading, setUploading] = useState(false);
+  const [showCoverLightbox, setShowCoverLightbox] = useState(false);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -273,7 +195,40 @@ export default function WineDetailPage() {
       .single();
     if (error) { alert(error.message); return; }
     setTastings(ts => [data as Tasting, ...ts]);
-    setAddDate(""); setAddNotes(""); setShowAdd(false);
+
+    // Upload any photos that were added alongside this tasting note
+    const photosToUpload = addTastingPhotos;
+    if (photosToUpload.length > 0) {
+      await uploadPendingPhotos((data as Tasting).id, photosToUpload);
+    }
+
+    setAddDate(""); setAddNotes(""); setAddTastingPhotos([]); setShowAdd(false);
+  }
+
+  // Upload pending photos from the add-tasting form, linking them to the given tasting.
+  async function uploadPendingPhotos(tastingId: string, photos: PendingPhoto[]) {
+    for (const photo of photos) {
+      if (photo.url) {
+        const { data, error } = await supabase
+          .from("wine_photos")
+          .insert({ wine_id: id, tasting_id: tastingId, external_url: photo.url })
+          .select("id, tasting_id, storage_path, external_url")
+          .single();
+        if (!error && data) setPhotos(ps => [...ps, data as Photo]);
+      } else if (photo.file && userId) {
+        let converted: File;
+        try { converted = await convertIfNeeded(photo.file); } catch { continue; }
+        const path = `${userId}/${id}/${photo.file.lastModified}_${converted.name}`;
+        const { error: upErr } = await supabase.storage.from("wine-photos").upload(path, converted);
+        if (upErr) { alert(upErr.message); continue; }
+        const { data, error } = await supabase
+          .from("wine_photos")
+          .insert({ wine_id: id, tasting_id: tastingId, storage_path: path })
+          .select("id, tasting_id, storage_path, external_url")
+          .single();
+        if (!error && data) setPhotos(ps => [...ps, data as Photo]);
+      }
+    }
   }
 
   function beginEdit(t: Tasting) {
@@ -284,14 +239,35 @@ export default function WineDetailPage() {
 
   async function saveEdit() {
     if (!editId) return;
+    const oldEditId = editId;
     const { data, error } = await supabase
       .from("wine_tastings")
-      .update({ tasted_on: editDate || null, notes: editNotes.trim() || null })
-      .eq("id", editId)
+      .insert({ wine_id: id, tasted_on: editDate || null, notes: editNotes.trim() || null })
       .select("id, tasted_on, notes")
       .single();
     if (error) { alert(error.message); return; }
-    setTastings(ts => ts.map(t => t.id === editId ? data as Tasting : t));
+
+    const { error: photoError } = await supabase
+      .from("wine_photos")
+      .update({ tasting_id: data.id })
+      .eq("tasting_id", oldEditId);
+    if (photoError) {
+      await supabase.from("wine_tastings").delete().eq("id", data.id);
+      alert(photoError.message);
+      return;
+    }
+
+    const { error: deleteError } = await supabase
+      .from("wine_tastings")
+      .delete()
+      .eq("id", oldEditId);
+    if (deleteError) {
+      alert(deleteError.message);
+      return;
+    }
+
+    setTastings(ts => ts.map(t => t.id === oldEditId ? data as Tasting : t));
+    setPhotos(ps => ps.map(p => p.tasting_id === oldEditId ? { ...p, tasting_id: data.id } : p));
     setEditId(null);
   }
 
@@ -381,6 +357,18 @@ export default function WineDetailPage() {
     const { error } = await supabase.from("wines").update({ cover_photo_url: url }).eq("id", id);
     if (error) { alert(error.message); return; }
     setWine(w => w ? { ...w, cover_photo_url: url } : w);
+  }
+
+  async function clearCover() {
+    const { error } = await supabase.from("wines").update({ cover_photo_url: null }).eq("id", id);
+    if (error) { alert(error.message); return; }
+    setWine(w => w ? { ...w, cover_photo_url: null } : w);
+  }
+
+  function replaceCover() {
+    setPhotoTarget("general");
+    setPhotoUrl("");
+    document.getElementById("wine-photos")?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   // ── Render helpers ───────────────────────────────────────────────────────────
@@ -477,7 +465,14 @@ export default function WineDetailPage() {
       <PageContainer className="max-w-4xl pb-16">
         <div className="flex items-start justify-between gap-4">
           <PageHero>
-            <Eyebrow>Cellar</Eyebrow>
+            <Eyebrow>
+              <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
+                <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3">
+                  <path d="M10 3L5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+                </svg>
+                My Wines
+              </Link>
+            </Eyebrow>
             <PageTitle>{wine.name}</PageTitle>
             <PageIntro>
               {wine.vintage_year ?? "NV"}{meta ? ` · ${meta}` : ""}
@@ -494,8 +489,36 @@ export default function WineDetailPage() {
         </div>
 
         {wine.cover_photo_url && (
-          <div className="mt-8 overflow-hidden rounded-[28px] border border-stone-200 bg-stone-100 aspect-video">
-            <img src={wine.cover_photo_url} alt={wine.name} className="h-full w-full object-cover" />
+          <div className="mt-8">
+            <div className="group relative inline-block">
+              <button
+                type="button"
+                onClick={() => setShowCoverLightbox(true)}
+                className="block overflow-hidden rounded-2xl border border-stone-200 bg-stone-100 text-left shadow-sm transition hover:border-stone-300"
+              >
+                <img
+                  src={wine.cover_photo_url}
+                  alt={wine.name}
+                  className="max-h-72 w-auto object-contain"
+                />
+              </button>
+              <div className="mt-2 flex gap-3">
+                <button
+                  type="button"
+                  onClick={replaceCover}
+                  className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800"
+                >
+                  Replace
+                </button>
+                <button
+                  type="button"
+                  onClick={clearCover}
+                  className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700"
+                >
+                  Remove
+                </button>
+              </div>
+            </div>
           </div>
         )}
 
@@ -546,34 +569,36 @@ export default function WineDetailPage() {
           </div>
 
         {showAdd && (
-            <div className="mb-3 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-4">
+          <div className="mb-3 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-4">
             <div>
-                <label className="mb-1 block text-xs font-medium text-stone-500">Date tasted</label>
-                <Input
+              <label className="mb-1 block text-xs font-medium text-stone-500">Date tasted</label>
+              <Input
                 type="date"
                 value={addDate}
-                  onChange={(e) => setAddDate(e.target.value)}
+                onChange={(e) => setAddDate(e.target.value)}
               />
             </div>
             <div>
-                <label className="mb-1 block text-xs font-medium text-stone-500">Notes</label>
-                <Textarea
-                  className="min-h-[120px]"
+              <label className="mb-1 block text-xs font-medium text-stone-500">Notes</label>
+              <Textarea
+                className="min-h-[120px]"
                 placeholder="What did you taste, smell, feel…"
                 value={addNotes}
-                  onChange={(e) => setAddNotes(e.target.value)}
+                onChange={(e) => setAddNotes(e.target.value)}
               />
             </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-stone-500">Photos</label>
+              <PhotoPicker onChange={setAddTastingPhotos} />
+            </div>
             <div className="flex gap-2">
-                <Button onClick={saveTasting}>
-                Save
-                </Button>
-                <Button
-                  variant="secondary"
-                onClick={() => { setShowAdd(false); setAddDate(""); setAddNotes(""); }}
+              <Button onClick={saveTasting}>Save</Button>
+              <Button
+                variant="secondary"
+                onClick={() => { setShowAdd(false); setAddDate(""); setAddNotes(""); setAddTastingPhotos([]); }}
               >
                 Cancel
-                </Button>
+              </Button>
             </div>
           </div>
         )}
@@ -654,7 +679,7 @@ export default function WineDetailPage() {
         </div>
         </Card>
 
-        <Card className="mt-8">
+        <Card className="mt-8" id="wine-photos">
           <div className="mb-3 flex items-center justify-between">
           <div>
               <CardTitle className="text-2xl">Photos</CardTitle>
@@ -702,6 +727,26 @@ export default function WineDetailPage() {
           </Card>
       )}
       </PageContainer>
+
+      {wine.cover_photo_url && showCoverLightbox && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 p-4"
+          onClick={() => setShowCoverLightbox(false)}
+        >
+          <div className="relative w-full max-w-5xl" onClick={(e) => e.stopPropagation()}>
+            <button
+              type="button"
+              onClick={() => setShowCoverLightbox(false)}
+              className="absolute right-3 top-3 z-10 rounded-full bg-white/90 px-3 py-1 text-sm font-medium text-stone-900 transition hover:bg-white"
+            >
+              Close
+            </button>
+            <div className="overflow-hidden rounded-[28px] bg-stone-950 shadow-2xl">
+              <img src={wine.cover_photo_url} alt={wine.name} className="max-h-[85vh] w-full object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }
