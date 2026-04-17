@@ -6,10 +6,10 @@ import { useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { cn } from "@/lib/utils";
 
-const navLinks = [
+const allNavLinks = [
   { href: "/", label: "Home" },
-  { href: "/wines", label: "My Wines" },
-  { href: "/knowledge", label: "My Knowledge" },
+  { href: "/wines", label: "My Wines", authRequired: true },
+  { href: "/knowledge", label: "My Knowledge", authRequired: true },
 ];
 
 export function NavBar() {
@@ -54,6 +54,8 @@ export function NavBar() {
     if (error) alert(error.message);
   }
 
+  const navLinks = allNavLinks.filter((l) => !l.authRequired || (authLoaded && email));
+
   function isActive(href: string) {
     if (href === "/") return pathname === "/";
     return pathname.startsWith(href);
@@ -91,18 +93,20 @@ export function NavBar() {
 
         {/* Right side: CTA + auth */}
         <div className="ml-auto flex items-center gap-2">
-          <Link
-            href="/wines/new"
-            className={cn(
-              "rounded-xl px-3.5 py-1.5 text-sm font-medium transition",
-              pathname === "/wines/new"
-                ? "bg-stone-700 text-white"
-                : "bg-stone-900 text-stone-50 hover:bg-stone-700"
-            )}
-          >
-            <span className="hidden sm:inline">Add New Wine</span>
-            <span className="sm:hidden">+ Add</span>
-          </Link>
+          {authLoaded && email && (
+            <Link
+              href="/wines/new"
+              className={cn(
+                "rounded-xl px-3.5 py-1.5 text-sm font-medium transition",
+                pathname === "/wines/new"
+                  ? "bg-stone-700 text-white"
+                  : "bg-stone-900 text-stone-50 hover:bg-stone-700"
+              )}
+            >
+              <span className="hidden sm:inline">Add New Wine</span>
+              <span className="sm:hidden">+ Add</span>
+            </Link>
+          )}
 
           {authLoaded && (
             email ? (
