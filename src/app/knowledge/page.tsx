@@ -303,6 +303,7 @@ function ProducerKnowledgeCard({
 }: ProducerKnowledgeCardProps) {
   const [query, setQuery] = useState("");
   const [regionQueries, setRegionQueries] = useState<Record<string, string>>({});
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [noteEditId, setNoteEditId] = useState<number | null>(null);
   const [noteEditText, setNoteEditText] = useState("");
   const [adding, setAdding] = useState(false);
@@ -412,18 +413,42 @@ function ProducerKnowledgeCard({
         <p className="mt-4 text-sm text-stone-500">No producers match the current search.</p>
       ) : (
         <div className="mt-4 max-h-[44rem] space-y-4 overflow-y-auto pr-1">
-          {visibleGroups.map((group) => (
+          {visibleGroups.map((group) => {
+            const isExpanded = expandedGroups.has(group.label);
+            const toggleExpanded = () =>
+              setExpandedGroups((prev) => {
+                const next = new Set(prev);
+                if (next.has(group.label)) next.delete(group.label);
+                else next.add(group.label);
+                return next;
+              });
+
+            return (
             <div key={group.label} className="rounded-[24px] border border-stone-200 bg-stone-50/70 p-4">
-              <div className="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick={toggleExpanded}
+                className="flex w-full items-center justify-between gap-3 text-left"
+              >
                 <div>
                   <div className="text-sm font-semibold text-stone-900">{group.label}</div>
                   <div className="mt-0.5 text-xs text-stone-500">
                     {group.label === "Unknown" ? "Producers without a linked region" : `${group.items.length} producer${group.items.length === 1 ? "" : "s"}`}
                   </div>
                 </div>
-                <Badge>{String(group.items.length)}</Badge>
-              </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <Badge>{String(group.items.length)}</Badge>
+                  <svg
+                    className={`h-4 w-4 text-stone-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                    fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                  >
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </div>
+              </button>
 
+              {isExpanded && (
+                <>
               <div className="mt-3">
                 <Input
                   type="search"
@@ -445,15 +470,19 @@ function ProducerKnowledgeCard({
                   return (
                     <div key={producer.id} className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
-                        <div>
-                          <Link
-                            href={`/knowledge/producers/${producer.id}`}
-                            className="text-sm font-medium text-stone-900 underline-offset-2 hover:underline"
-                          >
-                            {producer.name}
-                          </Link>
-                          <div className="mt-0.5 text-xs text-stone-500">{detail}</div>
-                        </div>
+                        <Link
+                          href={`/knowledge/producers/${producer.id}`}
+                          className="group flex min-w-0 flex-1 items-center gap-1"
+                        >
+                          <div className="min-w-0">
+                            <div className="text-sm font-medium text-stone-900 underline-offset-2 group-hover:underline">
+                              {producer.name}
+                            </div>
+                          </div>
+                          <svg className="ml-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                          </svg>
+                        </Link>
                         <div className="flex shrink-0 items-center gap-2">
                           <button
                             type="button"
@@ -523,8 +552,10 @@ function ProducerKnowledgeCard({
                   );
                 })}
               </div>
+                </>
+              )}
             </div>
-          ))}
+          );})}
         </div>
       )}
     </Card>
