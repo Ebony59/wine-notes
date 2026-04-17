@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
@@ -140,6 +141,17 @@ export default function ProducerDetailPage() {
     setEditingNotes(false);
   }
 
+  async function deleteNotes() {
+    if (!producer) return;
+    setSavingNotes(true);
+    const { error } = await supabase.from("producers").update({ notes: null }).eq("id", producer.id);
+    setSavingNotes(false);
+    if (error) { alert(error.message); return; }
+    setProducer(p => p ? { ...p, notes: null } : p);
+    setNotesText("");
+    setEditingNotes(false);
+  }
+
   async function saveLocation() {
     if (!producer) return;
 
@@ -189,6 +201,12 @@ export default function ProducerDetailPage() {
     }
     setPendingPhotos([]);
     setSavingPhotos(false);
+  }
+
+  async function clearLabelPhoto() {
+    const { error } = await supabase.from("producers").update({ cover_photo_url: null }).eq("id", Number(id));
+    if (error) { alert(error.message); return; }
+    setProducer(prev => prev ? { ...prev, cover_photo_url: null } : prev);
   }
 
   async function setLabelPhoto(p: ProducerPhoto) {
@@ -262,15 +280,16 @@ export default function ProducerDetailPage() {
           <div className="mt-6">
             <button
               type="button"
-              onClick={() => {
-                const p = photos.find(ph => resolveUrl(ph) === coverUrl);
-                if (p) setExpandedPhoto(p);
-              }}
+              onClick={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
               className="block overflow-hidden rounded-2xl border border-stone-200 shadow-sm transition hover:border-stone-300"
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={coverUrl} alt={producer.name} className="max-h-72 object-contain" />
             </button>
+            <div className="mt-2 flex gap-3">
+              <button type="button" onClick={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800">Replace</button>
+              <button type="button" onClick={clearLabelPhoto} className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700">Remove</button>
+            </div>
           </div>
         )}
 
@@ -366,17 +385,12 @@ export default function ProducerDetailPage() {
                 value={notesText}
                 onChange={(e) => setNotesText(e.target.value)}
               />
-              <div className="flex gap-2">
-                <Button onClick={saveNotes} disabled={savingNotes}>
-                  {savingNotes ? "Saving…" : "Save"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => { setEditingNotes(false); setNotesText(producer.notes ?? ""); }}
-                >
-                  Cancel
-                </Button>
-              </div>
+              <NotesEditBar
+                saving={savingNotes}
+                onSave={saveNotes}
+                onCancel={() => { setEditingNotes(false); setNotesText(producer.notes ?? ""); }}
+                onDelete={producer.notes ? deleteNotes : undefined}
+              />
             </div>
           ) : producer.notes ? (
             <p className="mt-4 whitespace-pre-wrap text-sm leading-relaxed text-stone-800">
@@ -388,7 +402,7 @@ export default function ProducerDetailPage() {
         </Card>
 
         {/* Photos */}
-        <Card className="mt-6">
+        <Card className="mt-6" id="entity-photos">
           <CardTitle className="text-2xl">Photos</CardTitle>
           <CardDescription className="mt-2">
             Select one photo as the label photo — it will appear at the top of this page.

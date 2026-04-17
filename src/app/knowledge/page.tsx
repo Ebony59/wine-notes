@@ -4,10 +4,12 @@ import Fuse from "fuse.js";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { VintageNotesList, type VintageNoteItem } from "@/components/VintageNotesList";
 import SearchableSelect from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Eyebrow,
   PageContainer,
@@ -55,11 +57,14 @@ type Producer = {
   notes: string | null;
 };
 
+type Vintage = VintageNoteItem & {
+  regions: { name: string; countries: { name: string } | null } | null;
+};
+
 type LookupItem = {
   id: number;
   label: string;
   detail?: string;
-  notes?: string | null;
 };
 
 type LookupSectionProps = {
@@ -68,7 +73,6 @@ type LookupSectionProps = {
   items: LookupItem[];
   onRename: (item: { id: number; label: string }) => Promise<void>;
   onDelete: (item: { id: number; label: string }) => Promise<void>;
-  onSaveNote: (item: { id: number }, notes: string) => Promise<void>;
   getItemHref?: (item: LookupItem) => string;
   onAdd?: (name: string) => Promise<void>;
   addExtra?: (name: string) => React.ReactNode;
@@ -79,24 +83,44 @@ type ProducerGroup = {
   items: Producer[];
 };
 
+type VintageGroup = {
+  label: string;
+  region: Region;
+  items: Vintage[];
+};
+
 type ProducerKnowledgeCardProps = {
   producers: Producer[];
   groups: ProducerGroup[];
-  regionsById: Map<number, Region>;
   onRename: (item: { id: number; label: string }) => Promise<void>;
   onDelete: (item: { id: number; label: string }) => Promise<void>;
-  onSaveNote: (item: { id: number }, notes: string) => Promise<void>;
   onReassignRegion: (item: Producer) => void;
   onAdd: (name: string) => Promise<void>;
   addExtra: () => React.ReactNode;
 };
 
+type VintageKnowledgeCardProps = {
+  vintages: Vintage[];
+  groups: VintageGroup[];
+  regions: Region[];
+  onAdd: (regionId: number, year: number, notes: string) => Promise<void>;
+  onUpdate: (regionId: number, year: number, notes: string) => Promise<void>;
+  onDelete: (regionId: number, year: number) => Promise<void>;
+};
+
+function parseVintageYear(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+
+  const year = Number(trimmed);
+  if (!Number.isInteger(year) || year < 1800 || year > 2100) return Number.NaN;
+  return year;
+}
+
 // ── LookupSection component ────────────────────────────────────────────────────
 
-function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote, getItemHref, onAdd, addExtra }: LookupSectionProps) {
+function LookupSection({ title, emptyText, items, onRename, onDelete, getItemHref, onAdd, addExtra }: LookupSectionProps) {
   const [query, setQuery] = useState("");
-  const [noteEditId, setNoteEditId] = useState<number | null>(null);
-  const [noteEditText, setNoteEditText] = useState("");
   const [adding, setAdding] = useState(false);
   const [addName, setAddName] = useState("");
   const [addBusy, setAddBusy] = useState(false);
@@ -121,16 +145,6 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
     if (!trimmed) return items;
     return fuse.search(trimmed).map((result) => result.item);
   }, [fuse, items, query]);
-
-  function openNoteEdit(item: LookupItem) {
-    setNoteEditId(item.id);
-    setNoteEditText(item.notes ?? "");
-  }
-
-  async function commitNote(item: LookupItem) {
-    await onSaveNote(item, noteEditText);
-    setNoteEditId(null);
-  }
 
   return (
     <Card className="border-stone-300/80">
@@ -206,22 +220,26 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
                   key={item.id}
                   className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3"
                 >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      {getItemHref ? (
-                        <Link
-                          href={getItemHref(item)}
-                          className="text-sm font-medium text-stone-900 underline-offset-2 hover:underline"
-                        >
-                          {item.label}
-                        </Link>
-                      ) : (
+                  <div className="flex items-center justify-between gap-3">
+                    {getItemHref ? (
+                      <Link
+                        href={getItemHref(item)}
+                        className="group flex min-w-0 flex-1 items-center gap-1"
+                      >
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium text-stone-900 underline-offset-2 group-hover:underline">{item.label}</div>
+                          {item.detail ? <div className="mt-0.5 text-xs text-stone-500">{item.detail}</div> : null}
+                        </div>
+                        <svg className="ml-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    ) : (
+                      <div className="min-w-0 flex-1">
                         <div className="text-sm font-medium text-stone-900">{item.label}</div>
-                      )}
-                      {item.detail ? (
-                        <div className="mt-0.5 text-xs text-stone-500">{item.detail}</div>
-                      ) : null}
-                    </div>
+                        {item.detail ? <div className="mt-0.5 text-xs text-stone-500">{item.detail}</div> : null}
+                      </div>
+                    )}
                     <div className="flex shrink-0 items-center gap-2">
                       <button
                         type="button"
@@ -239,47 +257,6 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
                       </button>
                     </div>
                   </div>
-
-                  {noteEditId === item.id ? (
-                    <div className="mt-3 space-y-2">
-                      <textarea
-                        rows={3}
-                        className="w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400"
-                        placeholder={`Notes about ${item.label}…`}
-                        value={noteEditText}
-                        onChange={(e) => setNoteEditText(e.target.value)}
-                      />
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => commitNote(item)}
-                          className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700"
-                        >
-                          Save
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setNoteEditId(null)}
-                          className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="mt-2">
-                      {item.notes ? (
-                        <p className="text-xs leading-relaxed text-stone-600 whitespace-pre-wrap">{item.notes}</p>
-                      ) : null}
-                      <button
-                        type="button"
-                        onClick={() => openNoteEdit(item)}
-                        className="mt-1 text-xs text-stone-400 underline underline-offset-2 transition hover:text-stone-600"
-                      >
-                        {item.notes ? "Edit note" : "+ Add note"}
-                      </button>
-                    </div>
-                  )}
                 </div>
               ))}
             </div>
@@ -293,10 +270,8 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, onSaveNote
 function ProducerKnowledgeCard({
   producers,
   groups,
-  regionsById,
   onRename,
   onDelete,
-  onSaveNote,
   onReassignRegion,
   onAdd,
   addExtra,
@@ -304,8 +279,6 @@ function ProducerKnowledgeCard({
   const [query, setQuery] = useState("");
   const [regionQueries, setRegionQueries] = useState<Record<string, string>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const [noteEditId, setNoteEditId] = useState<number | null>(null);
-  const [noteEditText, setNoteEditText] = useState("");
   const [adding, setAdding] = useState(false);
   const [addName, setAddName] = useState("");
   const [addBusy, setAddBusy] = useState(false);
@@ -318,16 +291,6 @@ function ProducerKnowledgeCard({
     setAddBusy(false);
     setAddName("");
     setAdding(false);
-  }
-
-  function openNoteEdit(item: Producer) {
-    setNoteEditId(item.id);
-    setNoteEditText(item.notes ?? "");
-  }
-
-  async function commitNote(item: Producer) {
-    await onSaveNote(item, noteEditText);
-    setNoteEditId(null);
   }
 
   const normalizedQuery = query.trim().toLowerCase();
@@ -460,13 +423,6 @@ function ProducerKnowledgeCard({
 
               <div className="mt-3 max-h-64 space-y-3 overflow-y-auto pr-1">
                 {group.items.map((producer) => {
-                  const linkedRegion = producer.region_id ? (regionsById.get(producer.region_id) ?? null) : null;
-                  const detail = linkedRegion
-                    ? linkedRegion.countries?.name
-                      ? `${linkedRegion.name} · ${linkedRegion.countries.name}`
-                      : linkedRegion.name
-                    : "Unknown";
-
                   return (
                     <div key={producer.id} className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
                       <div className="flex items-start justify-between gap-3">
@@ -486,13 +442,6 @@ function ProducerKnowledgeCard({
                         <div className="flex shrink-0 items-center gap-2">
                           <button
                             type="button"
-                            onClick={() => onReassignRegion(producer)}
-                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
-                          >
-                            Set region
-                          </button>
-                          <button
-                            type="button"
                             onClick={() => onRename({ id: producer.id, label: producer.name })}
                             className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
                           >
@@ -507,47 +456,15 @@ function ProducerKnowledgeCard({
                           </button>
                         </div>
                       </div>
-
-                      {noteEditId === producer.id ? (
-                        <div className="mt-3 space-y-2">
-                          <textarea
-                            rows={3}
-                            className="w-full resize-none rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-800 placeholder:text-stone-400 focus:outline-none focus:ring-2 focus:ring-stone-400"
-                            placeholder={`Notes about ${producer.name}…`}
-                            value={noteEditText}
-                            onChange={(e) => setNoteEditText(e.target.value)}
-                          />
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              onClick={() => commitNote(producer)}
-                              className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700"
-                            >
-                              Save
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setNoteEditId(null)}
-                              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="mt-2">
-                          {producer.notes ? (
-                            <p className="whitespace-pre-wrap text-xs leading-relaxed text-stone-600">{producer.notes}</p>
-                          ) : null}
-                          <button
-                            type="button"
-                            onClick={() => openNoteEdit(producer)}
-                            className="mt-1 text-xs text-stone-400 underline underline-offset-2 transition hover:text-stone-600"
-                          >
-                            {producer.notes ? "Edit note" : "+ Add note"}
-                          </button>
-                        </div>
-                      )}
+                      <div className="mt-2">
+                        <button
+                          type="button"
+                          onClick={() => onReassignRegion(producer)}
+                          className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+                        >
+                          Set region
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -562,6 +479,224 @@ function ProducerKnowledgeCard({
   );
 }
 
+function VintageKnowledgeCard({
+  vintages,
+  groups,
+  regions,
+  onAdd,
+  onUpdate,
+  onDelete,
+}: VintageKnowledgeCardProps) {
+  const [query, setQuery] = useState("");
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const [adding, setAdding] = useState(false);
+  const [addRegionValue, setAddRegionValue] = useState("");
+  const [addYear, setAddYear] = useState("");
+  const [addNotes, setAddNotes] = useState("");
+  const [addBusy, setAddBusy] = useState(false);
+
+  const sortedRegions = useMemo(
+    () => regions.slice().sort((a, b) => formatRegionOption(a).localeCompare(formatRegionOption(b))),
+    [regions]
+  );
+  const regionOptions = useMemo(
+    () => sortedRegions.map((region) => formatRegionOption(region)),
+    [sortedRegions]
+  );
+  const regionOptionMap = useMemo(
+    () => new Map(sortedRegions.map((region) => [formatRegionOption(region), region] as const)),
+    [sortedRegions]
+  );
+
+  const addYearValue = parseVintageYear(addYear);
+  const addYearInvalid = addYear.trim() !== "" && Number.isNaN(addYearValue);
+
+  async function commitAdd() {
+    const region = regionOptionMap.get(addRegionValue) ?? null;
+    if (!region || addYearValue === null || Number.isNaN(addYearValue) || !addNotes.trim()) return;
+
+    setAddBusy(true);
+    await onAdd(region.id, addYearValue, addNotes.trim());
+    setAddBusy(false);
+    setAddRegionValue("");
+    setAddYear("");
+    setAddNotes("");
+    setAdding(false);
+    setExpandedGroups((current) => new Set(current).add(formatRegionGroupLabel(region)));
+  }
+
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleGroups = groups
+    .map((group) => {
+      const matchesGroup = !normalizedQuery || group.label.toLowerCase().includes(normalizedQuery);
+      const items = group.items.filter((item) => {
+        if (matchesGroup) return true;
+        return (
+          item.year.toString().includes(normalizedQuery) ||
+          (item.notes ?? "").toLowerCase().includes(normalizedQuery)
+        );
+      });
+
+      return { ...group, items };
+    })
+    .filter((group) => group.items.length > 0);
+
+  return (
+    <Card className="border-stone-300/80">
+      <div className="flex items-center justify-between gap-3">
+        <h2 className="text-base font-semibold text-stone-900">Vintage Notes</h2>
+        <div className="flex items-center gap-2">
+          <Badge>{String(vintages.length)}</Badge>
+          {!adding && (
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              disabled={regions.length === 0}
+              className="flex h-6 w-6 items-center justify-center rounded-full border border-stone-300 text-stone-500 transition hover:border-stone-500 hover:bg-white hover:text-stone-800 disabled:cursor-not-allowed disabled:opacity-50"
+              aria-label="Add vintage note"
+            >
+              <svg viewBox="0 0 16 16" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                <path d="M8 3v10M3 8h10" />
+              </svg>
+            </button>
+          )}
+        </div>
+      </div>
+
+      {adding && (
+        <div className="mt-4 space-y-3 rounded-2xl border border-stone-200 bg-stone-50 p-3">
+          <SearchableSelect
+            value={addRegionValue}
+            onChange={setAddRegionValue}
+            options={regionOptions}
+            placeholder="Search region"
+            allLabel="Select a region"
+          />
+          <Input
+            value={addYear}
+            onChange={(event) => setAddYear(event.target.value)}
+            placeholder="Vintage year, e.g. 1998"
+            inputMode="numeric"
+          />
+          {addYearInvalid && (
+            <p className="-mt-1 text-xs text-rose-600">Use a year between 1800 and 2100.</p>
+          )}
+          <Textarea
+            rows={4}
+            className="min-h-[120px]"
+            placeholder="What stands out about this vintage in the region?"
+            value={addNotes}
+            onChange={(event) => setAddNotes(event.target.value)}
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={commitAdd}
+              disabled={!addRegionValue || addYearValue === null || Number.isNaN(addYearValue) || !addNotes.trim() || addBusy}
+              className="rounded-full bg-stone-900 px-3 py-1 text-xs text-white transition hover:bg-stone-700 disabled:opacity-50"
+            >
+              {addBusy ? "Saving…" : "Add"}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setAdding(false);
+                setAddRegionValue("");
+                setAddYear("");
+                setAddNotes("");
+              }}
+              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:bg-white"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {regions.length === 0 ? (
+        <p className="mt-4 text-sm text-stone-500">Add a region first, then you can save vintage notes under it.</p>
+      ) : (
+        <>
+          <div className="mt-4">
+            <Input
+              type="search"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+              placeholder="Search vintage notes..."
+            />
+          </div>
+
+          {visibleGroups.length === 0 ? (
+            <p className="mt-4 text-sm text-stone-500">
+              {vintages.length === 0 ? "No vintage notes yet." : "No vintage notes match the current search."}
+            </p>
+          ) : (
+            <div className="mt-4 max-h-[44rem] space-y-4 overflow-y-auto pr-1">
+              {visibleGroups.map((group) => {
+                const isExpanded = expandedGroups.has(group.label);
+                const toggleExpanded = () =>
+                  setExpandedGroups((current) => {
+                    const next = new Set(current);
+                    if (next.has(group.label)) next.delete(group.label);
+                    else next.add(group.label);
+                    return next;
+                  });
+
+                return (
+                  <div key={group.label} className="rounded-[24px] border border-stone-200 bg-stone-50/70 p-4">
+                    <button
+                      type="button"
+                      onClick={toggleExpanded}
+                      className="flex w-full items-center justify-between gap-3 text-left"
+                    >
+                      <div>
+                        <Link
+                          href={`/knowledge/regions/${group.region.id}#vintage-notes`}
+                          className="text-sm font-semibold text-stone-900 underline-offset-2 hover:underline"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          {group.label}
+                        </Link>
+                        <div className="mt-0.5 text-xs text-stone-500">
+                          {group.items.length} vintage note{group.items.length === 1 ? "" : "s"}
+                        </div>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <Badge>{String(group.items.length)}</Badge>
+                        <svg
+                          className={`h-4 w-4 text-stone-400 transition-transform duration-200 ${isExpanded ? "rotate-180" : ""}`}
+                          fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}
+                        >
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                        </svg>
+                      </div>
+                    </button>
+
+                    {isExpanded && (
+                      <div className="mt-3">
+                        <VintageNotesList
+                          regionId={group.region.id}
+                          regionName={group.region.name}
+                          vintages={group.items}
+                          emptyText="No vintage notes in this region."
+                          onUpdate={(year, notes) => onUpdate(group.region.id, year, notes)}
+                          onDelete={(year) => onDelete(group.region.id, year)}
+                          compact
+                          linkHref={`/knowledge/regions/${group.region.id}#vintage-notes`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </Card>
+  );
+}
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function KnowledgePage() {
@@ -571,6 +706,7 @@ export default function KnowledgePage() {
   const [subregions, setSubregions] = useState<Subregion[]>([]);
   const [grapes, setGrapes] = useState<Grape[]>([]);
   const [producers, setProducers] = useState<Producer[]>([]);
+  const [vintages, setVintages] = useState<Vintage[]>([]);
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [regionModalProducer, setRegionModalProducer] = useState<Producer | null>(null);
   const [regionModalValue, setRegionModalValue] = useState("");
@@ -580,12 +716,13 @@ export default function KnowledgePage() {
   const [addingModalRegion, setAddingModalRegion] = useState(false);
 
   const loadLookups = useCallback(async () => {
-    const [countryRes, regionRes, subregionRes, grapeRes, producerRes] = await Promise.all([
+    const [countryRes, regionRes, subregionRes, grapeRes, producerRes, vintageRes] = await Promise.all([
       supabase.from("countries").select("id,name,notes").order("name"),
       supabase.from("regions").select("id,name,country_id,notes,countries(name)").order("name"),
       supabase.from("subregions").select("id,name,region_id,notes,regions(name)").order("name"),
       supabase.from("grapes").select("id,name,notes").order("name"),
       supabase.from("producers").select("id,name,region_id,notes,regions(name)").order("name"),
+      supabase.from("vintages").select("region_id,year,notes,regions(name,countries(name))").order("year", { ascending: false }),
     ]);
 
     if (countryRes.error) alert(countryRes.error.message);
@@ -602,6 +739,9 @@ export default function KnowledgePage() {
 
     if (producerRes.error) alert(producerRes.error.message);
     else setProducers((producerRes.data as unknown as Producer[]) ?? []);
+
+    if (vintageRes.error) alert(vintageRes.error.message);
+    else setVintages((vintageRes.data as unknown as Vintage[]) ?? []);
   }, [supabase]);
 
   useEffect(() => {
@@ -745,38 +885,6 @@ export default function KnowledgePage() {
     await loadLookups();
   }
 
-  async function saveCountryNote(item: { id: number }, notes: string) {
-    setBusyKey(`country-note-${item.id}`);
-    const { error } = await supabase.from("countries").update({ notes: notes.trim() || null }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function saveRegionNote(item: { id: number }, notes: string) {
-    setBusyKey(`region-note-${item.id}`);
-    const { error } = await supabase.from("regions").update({ notes: notes.trim() || null }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function saveSubregionNote(item: { id: number }, notes: string) {
-    setBusyKey(`subregion-note-${item.id}`);
-    const { error } = await supabase.from("subregions").update({ notes: notes.trim() || null }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function saveGrapeNote(item: { id: number }, notes: string) {
-    setBusyKey(`grape-note-${item.id}`);
-    const { error } = await supabase.from("grapes").update({ notes: notes.trim() || null }).eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
   async function renameProducer(item: { id: number; label: string }) {
     const nextName = prompt("Rename producer", item.label)?.trim();
     if (!nextName || nextName === item.label) return;
@@ -795,14 +903,6 @@ export default function KnowledgePage() {
       if (error) { setBusyKey(null); return alert(error.message); }
     }
     const { error } = await supabase.from("producers").delete().eq("id", item.id);
-    setBusyKey(null);
-    if (error) return alert(error.message);
-    await loadLookups();
-  }
-
-  async function saveProducerNote(item: { id: number }, notes: string) {
-    setBusyKey(`producer-note-${item.id}`);
-    const { error } = await supabase.from("producers").update({ notes: notes.trim() || null }).eq("id", item.id);
     setBusyKey(null);
     if (error) return alert(error.message);
     await loadLookups();
@@ -915,26 +1015,46 @@ export default function KnowledgePage() {
     await loadLookups();
   }
 
+  async function addVintage(regionId: number, year: number, notes: string) {
+    const { error } = await supabase.from("vintages").insert({ region_id: regionId, year, notes });
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function updateVintage(regionId: number, year: number, notes: string) {
+    const { error } = await supabase
+      .from("vintages")
+      .update({ notes })
+      .eq("region_id", regionId)
+      .eq("year", year);
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
+  async function deleteVintage(regionId: number, year: number) {
+    const { error } = await supabase.from("vintages").delete().eq("region_id", regionId).eq("year", year);
+    if (error) return alert(error.message);
+    await loadLookups();
+  }
+
   // ── Derived items ──────────────────────────────────────────────────────────
 
   const regionLookup = new Map(regions.map((region) => [region.id, region] as const));
   const sortedRegions = regions.slice().sort((a, b) => formatRegionOption(a).localeCompare(formatRegionOption(b)));
   const regionOptions = sortedRegions.map((region) => formatRegionOption(region));
   const regionOptionMap = new Map(sortedRegions.map((region) => [formatRegionOption(region), region] as const));
-  const countryItems = countries.map((c) => ({ id: c.id, label: c.name, notes: c.notes }));
+  const countryItems = countries.map((c) => ({ id: c.id, label: c.name }));
   const regionItems = regions.map((r) => ({
     id: r.id,
     label: r.name,
     detail: r.countries?.name ? `Country: ${r.countries.name}` : "Country: NA",
-    notes: r.notes,
   }));
   const subregionItems = subregions.map((s) => ({
     id: s.id,
     label: s.name,
     detail: s.regions?.name ? `Region: ${s.regions.name}` : "Region: NA",
-    notes: s.notes,
   }));
-  const grapeItems = grapes.map((g) => ({ id: g.id, label: g.name, notes: g.notes }));
+  const grapeItems = grapes.map((g) => ({ id: g.id, label: g.name }));
   const groupedProducerItems = Array.from(
     producers.reduce((map, producer) => {
       const linkedRegion = producer.region_id ? (regionLookup.get(producer.region_id) ?? null) : null;
@@ -958,6 +1078,23 @@ export default function KnowledgePage() {
     .map(([label, items]) => ({
       label,
       items: items.slice().sort((a, b) => a.name.localeCompare(b.name)),
+    }));
+  const groupedVintageItems = Array.from(
+    vintages.reduce((map, vintage) => {
+      const region = regions.find((entry) => entry.id === vintage.region_id);
+      if (!region) return map;
+
+      const label = formatRegionGroupLabel(region);
+      const nextItems = map.get(region.id) ?? { label, region, items: [] as Vintage[] };
+      nextItems.items.push(vintage);
+      map.set(region.id, nextItems);
+      return map;
+    }, new Map<number, VintageGroup>()).values()
+  )
+    .sort((left, right) => left.label.localeCompare(right.label))
+    .map((group) => ({
+      ...group,
+      items: group.items.slice().sort((a, b) => b.year - a.year),
     }));
 
   // ── Render ─────────────────────────────────────────────────────────────────
@@ -988,7 +1125,7 @@ export default function KnowledgePage() {
             items={countryItems}
             onRename={renameCountry}
             onDelete={deleteCountry}
-            onSaveNote={saveCountryNote}
+            getItemHref={(item) => `/knowledge/countries/${item.id}`}
             onAdd={addCountry}
           />
           <LookupSection
@@ -997,7 +1134,7 @@ export default function KnowledgePage() {
             items={regionItems}
             onRename={renameRegion}
             onDelete={deleteRegion}
-            onSaveNote={saveRegionNote}
+            getItemHref={(item) => `/knowledge/regions/${item.id}`}
             onAdd={addRegion}
             addExtra={() => (
               <select
@@ -1016,7 +1153,7 @@ export default function KnowledgePage() {
             items={subregionItems}
             onRename={renameSubregion}
             onDelete={deleteSubregion}
-            onSaveNote={saveSubregionNote}
+            getItemHref={(item) => `/knowledge/subregions/${item.id}`}
             onAdd={addSubregion}
             addExtra={() => (
               <select
@@ -1035,17 +1172,15 @@ export default function KnowledgePage() {
             items={grapeItems}
             onRename={renameGrape}
             onDelete={deleteGrape}
-            onSaveNote={saveGrapeNote}
+            getItemHref={(item) => `/knowledge/grapes/${item.id}`}
             onAdd={addGrape}
           />
           <div className="lg:col-span-2">
             <ProducerKnowledgeCard
               producers={producers}
               groups={groupedProducerItems}
-              regionsById={regionLookup}
               onRename={renameProducer}
               onDelete={deleteProducer}
-              onSaveNote={saveProducerNote}
               onReassignRegion={openProducerRegionModal}
               onAdd={addProducer}
               addExtra={() => (
@@ -1077,6 +1212,16 @@ export default function KnowledgePage() {
                   </select>
                 </div>
               )}
+            />
+          </div>
+          <div className="lg:col-span-2">
+            <VintageKnowledgeCard
+              vintages={vintages}
+              groups={groupedVintageItems}
+              regions={regions}
+              onAdd={addVintage}
+              onUpdate={updateVintage}
+              onDelete={deleteVintage}
             />
           </div>
         </div>
@@ -1180,4 +1325,8 @@ export default function KnowledgePage() {
 
 function formatRegionOption(region: Region) {
   return region.countries?.name ? `${region.name} (${region.countries.name})` : region.name;
+}
+
+function formatRegionGroupLabel(region: Region) {
+  return region.countries?.name ? `${region.name} · ${region.countries.name}` : region.name;
 }

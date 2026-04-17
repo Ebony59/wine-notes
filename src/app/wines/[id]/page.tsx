@@ -1,10 +1,11 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -27,6 +28,8 @@ type Wine = {
   vintage_year: number | null;
   cover_photo_url: string | null;
   producer_id: number | null;
+  country_id: number | null;
+  region_id: number | null;
   subregion_id: number | null;
   producers: { name: string } | null;
   countries: { name: string; notes: string | null } | null;
@@ -35,6 +38,7 @@ type Wine = {
 };
 
 type GrapeLink = {
+  grape_id: number;
   grapes: { name: string; notes: string | null } | null;
 };
 
@@ -55,6 +59,12 @@ type SimilarWine = {
   id: string;
   name: string;
   vintage_year: number | null;
+};
+
+type VintageKnowledge = {
+  region_id: number;
+  year: number;
+  notes: string | null;
 };
 
 function fmtDate(d: string | null) {
@@ -81,7 +91,8 @@ export default function WineDetailPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [similar, setSimilar] = useState<SimilarWine[]>([]);
   const [grapes, setGrapes] = useState<string[]>([]);
-  const [grapeNotes, setGrapeNotes] = useState<{ name: string; notes: string }[]>([]);
+  const [grapeNotes, setGrapeNotes] = useState<{ id: number; name: string; notes: string }[]>([]);
+  const [vintageNote, setVintageNote] = useState<VintageKnowledge | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
@@ -114,7 +125,7 @@ export default function WineDetailPage() {
       const { data: w, error: wErr } = await supabase
         .from("wines")
         .select(`
-          id, name, vintage_year, cover_photo_url, producer_id, subregion_id,
+          id, name, vintage_year, cover_photo_url, producer_id, country_id, region_id, subregion_id,
           producers(name), countries(name,notes), regions(name,notes), subregions(name,notes)
         `)
         .eq("id", id)
@@ -124,7 +135,9 @@ export default function WineDetailPage() {
       if (!w) { setNotFound(true); return; }
       setWine(w as unknown as Wine);
 
-      const [{ data: ts }, { data: ps }, { data: grapeLinks, error: grapeError }] = await Promise.all([
+      const wTyped = w as unknown as Wine;
+
+      const [{ data: ts }, { data: ps }, { data: grapeLinks, error: grapeError }, vintageRes] = await Promise.all([
         supabase
           .from("wine_tastings")
           .select("id, tasted_on, notes")
@@ -137,8 +150,16 @@ export default function WineDetailPage() {
           .order("created_at", { ascending: true }),
         supabase
           .from("wine_grapes")
-          .select("grapes(name,notes)")
+          .select("grape_id, grapes(name,notes)")
           .eq("wine_id", id),
+        wTyped.region_id && wTyped.vintage_year !== null
+          ? supabase
+              .from("vintages")
+              .select("region_id,year,notes")
+              .eq("region_id", wTyped.region_id)
+              .eq("year", wTyped.vintage_year)
+              .maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ]);
 
       setTastings((ts ?? []) as Tasting[]);
@@ -153,12 +174,13 @@ export default function WineDetailPage() {
       setGrapeNotes(
         grapeRows
           .filter((row) => row.grapes?.name && row.grapes?.notes)
-          .map((row) => ({ name: row.grapes!.name, notes: row.grapes!.notes! }))
+          .map((row) => ({ id: row.grape_id, name: row.grapes!.name, notes: row.grapes!.notes! }))
           .sort((a, b) => a.name.localeCompare(b.name))
       );
+      if (vintageRes.error) { alert(vintageRes.error.message); return; }
+      setVintageNote((vintageRes.data as VintageKnowledge | null) ?? null);
 
       // Similar wines
-      const wTyped = w as unknown as Wine;
       const filters: string[] = [];
       if (wTyped.producer_id) filters.push(`producer_id.eq.${wTyped.producer_id}`);
       if (wTyped.subregion_id) filters.push(`subregion_id.eq.${wTyped.subregion_id}`);
@@ -457,8 +479,13 @@ export default function WineDetailPage() {
   );
 
   const generalPhotos = photos.filter(p => p.tasting_id === null);
-  const meta = [wine.producers?.name, wine.subregions?.name, wine.regions?.name, wine.countries?.name]
-    .filter(Boolean).join(" · ");
+
+  const metaEntries = [
+    wine.producer_id && wine.producers?.name ? { label: wine.producers.name, href: `/knowledge/producers/${wine.producer_id}` } : wine.producers?.name ? { label: wine.producers.name, href: null } : null,
+    wine.subregion_id && wine.subregions?.name ? { label: wine.subregions.name, href: `/knowledge/subregions/${wine.subregion_id}` } : wine.subregions?.name ? { label: wine.subregions.name, href: null } : null,
+    wine.region_id && wine.regions?.name ? { label: wine.regions.name, href: `/knowledge/regions/${wine.region_id}` } : wine.regions?.name ? { label: wine.regions.name, href: null } : null,
+    wine.country_id && wine.countries?.name ? { label: wine.countries.name, href: `/knowledge/countries/${wine.country_id}` } : wine.countries?.name ? { label: wine.countries.name, href: null } : null,
+  ].filter((e): e is { label: string; href: string | null } => e !== null && Boolean(e.label));
 
   return (
     <PageShell>
@@ -475,7 +502,24 @@ export default function WineDetailPage() {
             </Eyebrow>
             <PageTitle>{wine.name}</PageTitle>
             <PageIntro>
-              {wine.vintage_year ?? "NV"}{meta ? ` · ${meta}` : ""}
+              <span className="inline-flex flex-wrap items-center gap-y-0.5">
+                <span>{wine.vintage_year ?? "NV"}</span>
+                {metaEntries.map((entry, i) => (
+                  <Fragment key={i}>
+                    <span className="mx-1.5 text-stone-400">·</span>
+                    {entry.href ? (
+                      <Link href={entry.href} className="inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
+                        {entry.label}
+                        <svg className="h-3 w-3 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                        </svg>
+                      </Link>
+                    ) : (
+                      <span>{entry.label}</span>
+                    )}
+                  </Fragment>
+                ))}
+              </span>
             </PageIntro>
             {grapes.length > 0 && (
               <div className="mt-3">
@@ -520,39 +564,6 @@ export default function WineDetailPage() {
               </div>
             </div>
           </div>
-        )}
-
-        {(wine.countries?.notes || wine.regions?.notes || wine.subregions?.notes || grapeNotes.length > 0) && (
-          <Card className="mt-6">
-            <CardTitle className="text-xl">Knowledge Notes</CardTitle>
-            <CardDescription className="mt-1">Notes about this wine&apos;s origin and grapes.</CardDescription>
-            <div className="mt-4 space-y-4">
-              {wine.countries?.notes && (
-                <div>
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.countries.name}</div>
-                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.countries.notes}</p>
-                </div>
-              )}
-              {wine.regions?.notes && (
-                <div>
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.regions.name}</div>
-                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.regions.notes}</p>
-                </div>
-              )}
-              {wine.subregions?.notes && (
-                <div>
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.subregions.name}</div>
-                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.subregions.notes}</p>
-                </div>
-              )}
-              {grapeNotes.map(({ name, notes }) => (
-                <div key={name}>
-                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{name}</div>
-                  <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{notes}</p>
-                </div>
-              ))}
-            </div>
-          </Card>
         )}
 
         <Card className="mt-6">
@@ -627,14 +638,11 @@ export default function WineDetailPage() {
                       value={editNotes}
                         onChange={(e) => setEditNotes(e.target.value)}
                     />
-                    <div className="flex gap-2">
-                        <Button onClick={saveEdit}>
-                        Save
-                        </Button>
-                        <Button variant="secondary" onClick={() => setEditId(null)}>
-                        Cancel
-                        </Button>
-                    </div>
+                    <NotesEditBar
+                      onSave={saveEdit}
+                      onCancel={() => setEditId(null)}
+                      onDelete={() => { setEditId(null); deleteTasting(editId!); }}
+                    />
                   </div>
                 ) : (
                   <>
@@ -707,6 +715,78 @@ export default function WineDetailPage() {
           )
         )}
         </Card>
+
+      {(wine.countries?.notes || wine.regions?.notes || wine.subregions?.notes || grapeNotes.length > 0 || vintageNote?.notes) && (
+        <Card className="mt-8">
+          <CardTitle className="text-xl">Knowledge Notes</CardTitle>
+          <CardDescription className="mt-1">Notes about this wine&apos;s origin, vintage, and grapes.</CardDescription>
+          <div className="mt-4 space-y-4">
+            {wine.countries?.notes && (
+              <div>
+                {wine.country_id ? (
+                  <Link href={`/knowledge/countries/${wine.country_id}`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
+                    {wine.countries.name}
+                    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </Link>
+                ) : (
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.countries.name}</div>
+                )}
+                <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.countries.notes}</p>
+              </div>
+            )}
+            {wine.regions?.notes && (
+              <div>
+                {wine.region_id ? (
+                  <Link href={`/knowledge/regions/${wine.region_id}`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
+                    {wine.regions.name}
+                    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </Link>
+                ) : (
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.regions.name}</div>
+                )}
+                <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.regions.notes}</p>
+              </div>
+            )}
+            {vintageNote?.notes && wine.regions?.name && (
+              <div>
+                {wine.region_id ? (
+                  <Link href={`/knowledge/regions/${wine.region_id}#vintage-notes`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
+                    {wine.regions.name} {vintageNote.year}
+                    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </Link>
+                ) : (
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">
+                    {wine.regions.name} {vintageNote.year}
+                  </div>
+                )}
+                <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{vintageNote.notes}</p>
+              </div>
+            )}
+            {wine.subregions?.notes && (
+              <div>
+                {wine.subregion_id ? (
+                  <Link href={`/knowledge/subregions/${wine.subregion_id}`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
+                    {wine.subregions.name}
+                    <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                  </Link>
+                ) : (
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-stone-400">{wine.subregions.name}</div>
+                )}
+                <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.subregions.notes}</p>
+              </div>
+            )}
+            {grapeNotes.map(({ id: grapeId, name, notes }) => (
+              <div key={name}>
+                <Link href={`/knowledge/grapes/${grapeId}`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
+                  {name}
+                  <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
+                </Link>
+                <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{notes}</p>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
 
       {similar.length > 0 && (
           <Card className="mt-8">
