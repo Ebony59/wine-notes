@@ -47,6 +47,7 @@ type ExistingWine = {
   id: string;
   name: string;
   vintage_year: number | null;
+  producer_id: number | null;
   producers: { name: string } | null;
   countries: { name: string } | null;
   regions: { name: string } | null;
@@ -74,6 +75,7 @@ export default function AddWinePage() {
   const [subregion, setSubregion] = useState("NA");
   const [producer, setProducer] = useState("NA");
   const [grapes, setGrapes] = useState<string[]>([]);
+  const [generalNotes, setGeneralNotes] = useState("");
 
   // Tasting fields
   const [tastedOn, setTastedOn] = useState("");
@@ -91,7 +93,7 @@ export default function AddWinePage() {
     const { data, error } = await supabase
       .from("wines")
       .select(`
-        id, name, vintage_year,
+        id, name, vintage_year, producer_id,
         producers(name), countries(name), regions(name), subregions(name),
         wine_grapes(grapes(name))
       `)
@@ -289,7 +291,29 @@ export default function AddWinePage() {
         )
       )
     );
+    void loadGeneralNotes(wine.name, wine.producer_id);
     setNameOpen(false);
+  }
+
+  async function loadGeneralNotes(wineName: string, producerId: number | null) {
+    if (!userId) return;
+
+    let noteQuery = supabase
+      .from("wine_group_notes")
+      .select("notes")
+      .eq("user_id", userId)
+      .eq("wine_name", wineName);
+
+    if (producerId === null) noteQuery = noteQuery.is("producer_id", null);
+    else noteQuery = noteQuery.eq("producer_id", producerId);
+
+    const { data, error } = await noteQuery.maybeSingle();
+    if (error) {
+      alert(error.message);
+      return;
+    }
+
+    setGeneralNotes(data?.notes ?? "");
   }
 
   // ── DB helpers ────────────────────────────────────────────────────────────────
@@ -415,6 +439,7 @@ export default function AddWinePage() {
     const producerName = normalizeField(producer);
 
     const hasTasting = notes.trim() || tastedOn;
+    const hasGeneralNotes = generalNotes.trim().length > 0;
     const photosSnapshot = pendingPhotos; // capture before any async work
 
     let country_id: number | null = null;
@@ -445,6 +470,38 @@ export default function AddWinePage() {
       if (dupError) return alert(dupError.message);
 
       if (existingMatch) {
+        if (hasGeneralNotes) {
+          let groupNoteQuery = supabase
+            .from("wine_group_notes")
+            .select("id")
+            .eq("user_id", userId)
+            .eq("wine_name", wineName);
+
+          if (producer_id === null) groupNoteQuery = groupNoteQuery.is("producer_id", null);
+          else groupNoteQuery = groupNoteQuery.eq("producer_id", producer_id);
+
+          const { data: existingGroupNote, error: groupNoteSelectError } = await groupNoteQuery.maybeSingle();
+          if (groupNoteSelectError) return alert(groupNoteSelectError.message);
+
+          if (existingGroupNote?.id) {
+            const { error: updateGroupNoteError } = await supabase
+              .from("wine_group_notes")
+              .update({ notes: generalNotes.trim() })
+              .eq("id", existingGroupNote.id);
+            if (updateGroupNoteError) return alert(updateGroupNoteError.message);
+          } else {
+            const { error: insertGroupNoteError } = await supabase
+              .from("wine_group_notes")
+              .insert({
+                user_id: userId,
+                wine_name: wineName,
+                producer_id,
+                notes: generalNotes.trim(),
+              });
+            if (insertGroupNoteError) return alert(insertGroupNoteError.message);
+          }
+        }
+
         // Wine already exists — add tasting + photos, then redirect
         let savedTastingId: string | null = null;
         if (hasTasting) {
@@ -481,6 +538,18 @@ export default function AddWinePage() {
           grapeIds.map(grapeId => ({ wine_id: newWine.id, grape_id: grapeId }))
         );
         if (grapeError) return alert(grapeError.message);
+      }
+
+      if (hasGeneralNotes) {
+        const { error: generalNotesError } = await supabase
+          .from("wine_group_notes")
+          .insert({
+            user_id: userId,
+            wine_name: wineName,
+            producer_id,
+            notes: generalNotes.trim(),
+          });
+        if (generalNotesError) return alert(generalNotesError.message);
       }
 
       let savedTastingId: string | null = null;
@@ -522,7 +591,7 @@ export default function AddWinePage() {
           </Eyebrow>
           <PageTitle>Log a new bottle to your cellar</PageTitle>
           <PageIntro>
-            Fill in what you know — leave unknown fields as NA. You can add more notes and photos after saving.
+            Fill in what you know. Leave unknown fields as NA, and add wine-level notes separately from your first tasting note.
           </PageIntro>
         </PageHero>
 
@@ -681,6 +750,25 @@ export default function AddWinePage() {
                 }}
               />
             </Field>
+
+            <div className="border-t border-stone-200 pt-5">
+              <CardTitle className="text-xl">General Wine Notes</CardTitle>
+              <CardDescription className="mt-2">
+                Notes about the wine overall across all vintages: style, aging, producer context, food pairings.
+              </CardDescription>
+
+              <div className="mt-4">
+                <Field>
+                  <FieldLabel>General notes</FieldLabel>
+                  <Textarea
+                    className="min-h-[140px]"
+                    placeholder="What should you remember about this wine overall?"
+                    value={generalNotes}
+                    onChange={(e) => setGeneralNotes(e.target.value)}
+                  />
+                </Field>
+              </div>
+            </div>
 
             {/* ── First Tasting Note ────────────────────────────────────────── */}
             <div className="border-t border-stone-200 pt-5">

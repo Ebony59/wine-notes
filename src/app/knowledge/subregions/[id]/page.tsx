@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { WineCard, groupWinesForCards, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { CoverPhoto } from "@/components/CoverPhoto";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
@@ -39,13 +41,7 @@ type SubregionPhoto = {
   external_url: string | null;
 };
 
-type Wine = {
-  id: string;
-  name: string;
-  vintage_year: number | null;
-  countries: { name: string } | null;
-  regions: { name: string } | null;
-};
+type Wine = WineCardWine;
 
 export default function SubregionDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -77,7 +73,7 @@ export default function SubregionDetailPage() {
       const [subregionRes, photosRes, winesRes] = await Promise.all([
         supabase.from("subregions").select("id,name,notes,cover_photo_url,region_id,regions(id,name,country_id,countries(id,name))").eq("id", id).maybeSingle(),
         supabase.from("subregion_photos").select("id,storage_path,external_url").eq("subregion_id", id).order("created_at", { ascending: true }),
-        supabase.from("wines").select("id,name,vintage_year,countries(name),regions(name)").eq("subregion_id", id).order("name"),
+        supabase.from("wines").select("id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name)").eq("subregion_id", id).order("name"),
       ]);
 
       if (subregionRes.error) { alert(subregionRes.error.message); return; }
@@ -90,6 +86,8 @@ export default function SubregionDetailPage() {
       setWines((winesRes.data ?? []) as unknown as Wine[]);
     }
   }, [supabase, id]);
+
+  const wineGroups = useMemo(() => groupWinesForCards(wines), [wines]);
 
   function resolveUrl(p: SubregionPhoto): string {
     if (p.external_url) return p.external_url;
@@ -206,20 +204,14 @@ export default function SubregionDetailPage() {
         </PageHero>
 
         {coverUrl && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
-              className="block overflow-hidden rounded-2xl border border-stone-200 shadow-sm transition hover:border-stone-300"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverUrl} alt={subregion.name} className="max-h-72 object-contain" />
-            </button>
-            <div className="mt-2 flex gap-3">
-              <button type="button" onClick={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800">Replace</button>
-              <button type="button" onClick={clearLabelPhoto} className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700">Remove</button>
-            </div>
-          </div>
+          <CoverPhoto
+            className="mt-6"
+            url={coverUrl}
+            alt={subregion.name}
+            onExpand={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
+            onReplace={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            onRemove={clearLabelPhoto}
+          />
         )}
 
         {/* Location */}
@@ -319,22 +311,17 @@ export default function SubregionDetailPage() {
         {/* Wines */}
         <Card className="mt-6">
           <CardTitle className="text-xl">Wines</CardTitle>
-          {wines.length === 0 ? (
+          {wineGroups.length === 0 ? (
             <p className="mt-3 text-sm text-stone-500">No wines recorded for this sub-region.</p>
           ) : (
             <div className="mt-4 space-y-2">
-              {wines.map(wine => {
-                const location = [wine.regions?.name, wine.countries?.name].filter(Boolean).join(" · ");
-                return (
-                  <Link key={wine.id} href={`/wines/${wine.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 transition hover:bg-stone-50">
-                    <div>
-                      <div className="text-sm font-medium text-stone-900">{wine.name}</div>
-                      {location && <div className="mt-0.5 text-xs text-stone-500">{location}</div>}
-                    </div>
-                    <div className="shrink-0 text-sm text-stone-500">{wine.vintage_year ?? "NV"}</div>
-                  </Link>
-                );
-              })}
+              {wineGroups.map((group) => (
+                <WineCard
+                  key={`${group[0].producer_id ?? "none"}-${group[0].name}`}
+                  wines={group}
+                  hideFields={["subregion"]}
+                />
+              ))}
             </div>
           )}
         </Card>

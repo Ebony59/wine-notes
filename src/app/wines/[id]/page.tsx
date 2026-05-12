@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { Fragment, useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { getWineGroupHref } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { CoverPhoto } from "@/components/CoverPhoto";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Badge } from "@/components/ui/badge";
@@ -500,7 +502,11 @@ export default function WineDetailPage() {
                 My Wines
               </Link>
             </Eyebrow>
-            <PageTitle>{wine.name}</PageTitle>
+            <PageTitle>
+              <Link href={getWineGroupHref(wine)} className="underline-offset-4 hover:underline">
+                {wine.name}
+              </Link>
+            </PageTitle>
             <PageIntro>
               <span className="inline-flex flex-wrap items-center gap-y-0.5">
                 <span>{wine.vintage_year ?? "NV"}</span>
@@ -533,37 +539,14 @@ export default function WineDetailPage() {
         </div>
 
         {wine.cover_photo_url && (
-          <div className="mt-8">
-            <div className="group relative inline-block">
-              <button
-                type="button"
-                onClick={() => setShowCoverLightbox(true)}
-                className="block overflow-hidden rounded-2xl border border-stone-200 bg-stone-100 text-left shadow-sm transition hover:border-stone-300"
-              >
-                <img
-                  src={wine.cover_photo_url}
-                  alt={wine.name}
-                  className="max-h-72 w-auto object-contain"
-                />
-              </button>
-              <div className="mt-2 flex gap-3">
-                <button
-                  type="button"
-                  onClick={replaceCover}
-                  className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800"
-                >
-                  Replace
-                </button>
-                <button
-                  type="button"
-                  onClick={clearCover}
-                  className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700"
-                >
-                  Remove
-                </button>
-              </div>
-            </div>
-          </div>
+          <CoverPhoto
+            className="mt-8"
+            url={wine.cover_photo_url}
+            alt={wine.name}
+            onExpand={() => setShowCoverLightbox(true)}
+            onReplace={replaceCover}
+            onRemove={clearCover}
+          />
         )}
 
         <Card className="mt-6">

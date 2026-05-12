@@ -3,6 +3,7 @@
 import Link from "next/link";
 import Fuse from "fuse.js";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { WineCard, type WineCardWine, getWineGroupHref } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import MultiSearchableSelect from "@/components/MultiSearchableSelect";
 import SearchableSelect from "@/components/SearchableSelect";
@@ -18,14 +19,7 @@ import {
   PageTitle,
 } from "@/components/ui/page-shell";
 
-type Wine = {
-  id: string;
-  name: string;
-  vintage_year: number | null;
-  producers?: { name: string } | null;
-  countries: { name: string } | null;
-  regions: { name: string } | null;
-  subregions: { name: string } | null;
+type Wine = WineCardWine & {
   wine_grapes?: { grapes: { name: string } | null }[] | null;
 };
 
@@ -125,12 +119,12 @@ function RegionSection({
                   onClick={() => onToggleProducer(producerKey)}
                   className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-stone-50"
                 >
-                  <div>
-                    <div className="font-medium text-stone-900">{producerGroup.producer}</div>
-                    <div className="mt-0.5 text-xs text-stone-500">
-                      {producerGroup.names.reduce((count, group) => count + group.wines.length, 0)} wines
+                    <div>
+                      <div className="font-medium text-stone-900">{producerGroup.producer}</div>
+                      <div className="mt-0.5 text-xs text-stone-500">
+                      {producerGroup.names.length} wines
+                      </div>
                     </div>
-                  </div>
                   <svg
                     aria-hidden="true"
                     viewBox="0 0 20 20"
@@ -150,56 +144,12 @@ function RegionSection({
                 {producerOpen && (
                   <div className="space-y-2 border-t border-stone-200 px-3 py-3">
                     {producerGroup.names.map((nameGroup) => {
-                      if (nameGroup.wines.length === 1) {
-                        const wine = nameGroup.wines[0];
-                        return (
-                          <Link
-                            key={wine.id}
-                            href={`/wines/${wine.id}`}
-                            className="block rounded-xl border border-stone-200 bg-white px-3 py-3 transition hover:bg-stone-50"
-                          >
-                            <div className="flex items-baseline justify-between gap-3">
-                              <div className="font-medium text-stone-900">{wine.name}</div>
-                              <div className="text-sm text-stone-500">{wine.vintage_year ?? "NV"}</div>
-                            </div>
-                            {wine.subregions?.name && (
-                              <div className="mt-0.5 text-xs text-stone-500">{wine.subregions.name}</div>
-                            )}
-                          </Link>
-                        );
-                      }
-
                       return (
-                        <div
+                        <WineCard
                           key={`${producerKey}|${nameGroup.name}`}
-                          className="rounded-xl border border-stone-200 bg-white px-3 py-3"
-                        >
-                          <div className="flex items-start justify-between gap-3">
-                            <div>
-                              <div className="font-medium text-stone-900">{nameGroup.name}</div>
-                              {wineLocation(nameGroup.wines[0]) && (
-                                <div className="mt-0.5 text-xs text-stone-500">
-                                  {wineLocation(nameGroup.wines[0])}
-                                </div>
-                              )}
-                            </div>
-                            <div className="text-xs text-stone-500">
-                              {nameGroup.wines.length} vintages
-                            </div>
-                          </div>
-
-                          <div className="mt-3 flex flex-wrap gap-2">
-                            {nameGroup.wines.map((wine) => (
-                              <Link
-                                key={wine.id}
-                                href={`/wines/${wine.id}`}
-                                className="rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-50"
-                              >
-                                {wine.vintage_year ?? "NV"}
-                              </Link>
-                            ))}
-                          </div>
-                        </div>
+                          wines={nameGroup.wines}
+                          hideFields={["producer", "country", "region"]}
+                        />
                       );
                     })}
                   </div>
@@ -248,7 +198,7 @@ export default function WinesPage() {
     async function loadWines() {
       const { data, error } = await supabase
         .from("wines")
-        .select("id,name,vintage_year,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grapes(name))")
+        .select("id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grapes(name))")
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -476,7 +426,7 @@ export default function WinesPage() {
             {searchResults.map((w) => (
               <li key={w.id}>
                 <Link
-                  href={`/wines/${w.id}`}
+                  href={getWineGroupHref(w)}
                   className="flex items-baseline justify-between gap-3 rounded-xl px-4 py-2.5 transition hover:bg-stone-50"
                   onMouseDown={(e) => e.preventDefault()}
                 >

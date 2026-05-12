@@ -3,8 +3,10 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { WineCard, groupWinesForCards, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { CoverPhoto } from "@/components/CoverPhoto";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
@@ -32,14 +34,7 @@ type GrapePhoto = {
   external_url: string | null;
 };
 
-type Wine = {
-  id: string;
-  name: string;
-  vintage_year: number | null;
-  countries: { name: string } | null;
-  regions: { name: string } | null;
-  subregions: { name: string } | null;
-};
+type Wine = WineCardWine;
 
 type WineGrapeRow = {
   wines: Wine | null;
@@ -75,7 +70,7 @@ export default function GrapeDetailPage() {
       const [grapeRes, photosRes, wineGrapesRes] = await Promise.all([
         supabase.from("grapes").select("id,name,notes,cover_photo_url").eq("id", id).maybeSingle(),
         supabase.from("grape_photos").select("id,storage_path,external_url").eq("grape_id", id).order("created_at", { ascending: true }),
-        supabase.from("wine_grapes").select("wines(id,name,vintage_year,countries(name),regions(name),subregions(name))").eq("grape_id", id),
+        supabase.from("wine_grapes").select("wines(id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name))").eq("grape_id", id),
       ]);
 
       if (grapeRes.error) { alert(grapeRes.error.message); return; }
@@ -90,6 +85,8 @@ export default function GrapeDetailPage() {
       setWines(rows.map(row => row.wines).filter((w): w is Wine => w !== null));
     }
   }, [supabase, id]);
+
+  const wineGroups = useMemo(() => groupWinesForCards(wines), [wines]);
 
   function resolveUrl(p: GrapePhoto): string {
     if (p.external_url) return p.external_url;
@@ -193,20 +190,14 @@ export default function GrapeDetailPage() {
         </PageHero>
 
         {coverUrl && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
-              className="block overflow-hidden rounded-2xl border border-stone-200 shadow-sm transition hover:border-stone-300"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverUrl} alt={grape.name} className="max-h-72 object-contain" />
-            </button>
-            <div className="mt-2 flex gap-3">
-              <button type="button" onClick={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800">Replace</button>
-              <button type="button" onClick={clearLabelPhoto} className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700">Remove</button>
-            </div>
-          </div>
+          <CoverPhoto
+            className="mt-6"
+            url={coverUrl}
+            alt={grape.name}
+            onExpand={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
+            onReplace={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            onRemove={clearLabelPhoto}
+          />
         )}
 
         {/* Notes */}
@@ -281,22 +272,13 @@ export default function GrapeDetailPage() {
         {/* Wines */}
         <Card className="mt-6">
           <CardTitle className="text-xl">Wines</CardTitle>
-          {wines.length === 0 ? (
+          {wineGroups.length === 0 ? (
             <p className="mt-3 text-sm text-stone-500">No wines recorded with this grape.</p>
           ) : (
             <div className="mt-4 space-y-2">
-              {wines.map(wine => {
-                const location = [wine.subregions?.name, wine.regions?.name, wine.countries?.name].filter(Boolean).join(" · ");
-                return (
-                  <Link key={wine.id} href={`/wines/${wine.id}`} className="flex items-center justify-between gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 transition hover:bg-stone-50">
-                    <div>
-                      <div className="text-sm font-medium text-stone-900">{wine.name}</div>
-                      {location && <div className="mt-0.5 text-xs text-stone-500">{location}</div>}
-                    </div>
-                    <div className="shrink-0 text-sm text-stone-500">{wine.vintage_year ?? "NV"}</div>
-                  </Link>
-                );
-              })}
+              {wineGroups.map((group) => (
+                <WineCard key={`${group[0].producer_id ?? "none"}-${group[0].name}`} wines={group} />
+              ))}
             </div>
           )}
         </Card>

@@ -4,8 +4,10 @@ import Link from "next/link";
 import Fuse from "fuse.js";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { WineCard, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { CoverPhoto } from "@/components/CoverPhoto";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { VintageNotesList, type VintageNoteItem } from "@/components/VintageNotesList";
@@ -48,13 +50,8 @@ type Producer = {
   name: string;
 };
 
-type Wine = {
-  id: string;
-  name: string;
-  vintage_year: number | null;
+type Wine = WineCardWine & {
   producers: { id: number; name: string } | null;
-  countries: { name: string } | null;
-  subregions: { name: string } | null;
 };
 
 type Vintage = VintageNoteItem;
@@ -113,45 +110,12 @@ function ProducerRow({ group }: { group: ProducerWinesGroup }) {
       {open && (
         <div className="space-y-2 border-t border-stone-200 px-3 py-3">
           {group.nameGroups.map((nameGroup) => {
-            if (nameGroup.wines.length === 1) {
-              const wine = nameGroup.wines[0];
-              return (
-                <Link
-                  key={wine.id}
-                  href={`/wines/${wine.id}`}
-                  className="block rounded-xl border border-stone-200 bg-white px-3 py-3 transition hover:bg-stone-50"
-                >
-                  <div className="flex items-baseline justify-between gap-3">
-                    <div className="font-medium text-stone-900">{wine.name}</div>
-                    <div className="text-sm text-stone-500">{wine.vintage_year ?? "NV"}</div>
-                  </div>
-                  {wine.subregions?.name && (
-                    <div className="mt-0.5 text-xs text-stone-500">{wine.subregions.name}</div>
-                  )}
-                </Link>
-              );
-            }
             return (
-              <div
+              <WineCard
                 key={nameGroup.name}
-                className="rounded-xl border border-stone-200 bg-white px-3 py-3"
-              >
-                <div className="flex items-start justify-between gap-3">
-                  <div className="font-medium text-stone-900">{nameGroup.name}</div>
-                  <div className="text-xs text-stone-500">{nameGroup.wines.length} vintages</div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {nameGroup.wines.map((wine) => (
-                    <Link
-                      key={wine.id}
-                      href={`/wines/${wine.id}`}
-                      className="rounded-full border border-stone-300 px-3 py-1.5 text-sm text-stone-700 transition hover:bg-stone-50"
-                    >
-                      {wine.vintage_year ?? "NV"}
-                    </Link>
-                  ))}
-                </div>
-              </div>
+                wines={nameGroup.wines}
+                hideFields={["producer", "region", "country"]}
+              />
             );
           })}
         </div>
@@ -197,7 +161,7 @@ export default function RegionDetailPage() {
         supabase.from("region_photos").select("id,storage_path,external_url").eq("region_id", id).order("created_at", { ascending: true }),
         supabase.from("subregions").select("id,name").eq("region_id", id).order("name"),
         supabase.from("producers").select("id,name").eq("region_id", id).order("name"),
-        supabase.from("wines").select("id,name,vintage_year,producers(id,name),countries(name),subregions(name)").eq("region_id", id).order("name"),
+        supabase.from("wines").select("id,name,vintage_year,producer_id,producers(id,name),countries(name),regions(name),subregions(name)").eq("region_id", id).order("name"),
         supabase.from("vintages").select("region_id,year,notes").eq("region_id", id).order("year", { ascending: false }),
       ]);
 
@@ -351,12 +315,14 @@ export default function RegionDetailPage() {
     const knownNames = new Set(producers.map((p) => p.name));
     const groups: ProducerWinesGroup[] = producers.map((p) => {
       const ws = winesByProducer.get(p.name) ?? [];
-      return { producerId: p.id, producerName: p.name, nameGroups: buildNameGroups(ws), wineCount: ws.length };
+      const nameGroups = buildNameGroups(ws);
+      return { producerId: p.id, producerName: p.name, nameGroups, wineCount: nameGroups.length };
     });
 
     for (const [name, ws] of winesByProducer) {
       if (name !== "__none__" && !knownNames.has(name)) {
-        groups.push({ producerId: null, producerName: name, nameGroups: buildNameGroups(ws), wineCount: ws.length });
+        const nameGroups = buildNameGroups(ws);
+        groups.push({ producerId: null, producerName: name, nameGroups, wineCount: nameGroups.length });
       }
     }
 
@@ -364,7 +330,8 @@ export default function RegionDetailPage() {
 
     const unassigned = winesByProducer.get("__none__") ?? [];
     if (unassigned.length > 0) {
-      groups.push({ producerId: null, producerName: "No Producer", nameGroups: buildNameGroups(unassigned), wineCount: unassigned.length });
+      const nameGroups = buildNameGroups(unassigned);
+      groups.push({ producerId: null, producerName: "No Producer", nameGroups, wineCount: nameGroups.length });
     }
 
     return groups;
@@ -420,20 +387,14 @@ export default function RegionDetailPage() {
         </PageHero>
 
         {coverUrl && (
-          <div className="mt-6">
-            <button
-              type="button"
-              onClick={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
-              className="block overflow-hidden rounded-2xl border border-stone-200 shadow-sm transition hover:border-stone-300"
-            >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={coverUrl} alt={region.name} className="max-h-72 object-contain" />
-            </button>
-            <div className="mt-2 flex gap-3">
-              <button type="button" onClick={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })} className="text-xs text-stone-500 underline underline-offset-2 transition hover:text-stone-800">Replace</button>
-              <button type="button" onClick={clearLabelPhoto} className="text-xs text-rose-500 underline underline-offset-2 transition hover:text-rose-700">Remove</button>
-            </div>
-          </div>
+          <CoverPhoto
+            className="mt-6"
+            url={coverUrl}
+            alt={region.name}
+            onExpand={() => { const p = photos.find(ph => resolveUrl(ph) === coverUrl); if (p) setExpandedPhoto(p); }}
+            onReplace={() => document.getElementById("entity-photos")?.scrollIntoView({ behavior: "smooth", block: "start" })}
+            onRemove={clearLabelPhoto}
+          />
         )}
 
         {/* Location */}
