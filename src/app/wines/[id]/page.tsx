@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getWineGroupHref } from "@/components/WineCard";
+import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
@@ -12,7 +13,6 @@ import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -22,7 +22,6 @@ import {
   Eyebrow,
   PageContainer,
   PageHero,
-  PageIntro,
   PageShell,
   PageTitle,
 } from "@/components/ui/page-shell";
@@ -85,8 +84,10 @@ function fmtDate(d: string | null) {
   });
 }
 
-function normalizeGrapeList(values: string[]) {
-  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
+function normalizeGrapes(values: { id: number; name: string }[]) {
+  return Array.from(
+    new Map(values.map((value) => [value.id, value] as const)).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
 }
 
 function normalizeField(v: string) {
@@ -111,7 +112,7 @@ export default function WineDetailPage() {
   const [tastings, setTastings] = useState<Tasting[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [similar, setSimilar] = useState<SimilarWine[]>([]);
-  const [grapes, setGrapes] = useState<string[]>([]);
+  const [grapes, setGrapes] = useState<{ id: number; name: string }[]>([]);
   const [grapeNotes, setGrapeNotes] = useState<{ id: number; name: string; notes: string }[]>([]);
   const [vintageNote, setVintageNote] = useState<VintageKnowledge | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -196,11 +197,13 @@ export default function WineDetailPage() {
       setPhotos((ps ?? []) as Photo[]);
       if (grapeError) { alert(grapeError.message); return; }
       const grapeRows = (grapeLinks ?? []) as unknown as GrapeLink[];
-      setGrapes(normalizeGrapeList(
-        grapeRows
-          .map((row) => row.grapes?.name)
-          .filter((value): value is string => Boolean(value))
-      ));
+      setGrapes(
+        normalizeGrapes(
+          grapeRows
+            .filter((row) => row.grapes?.name)
+            .map((row) => ({ id: row.grape_id, name: row.grapes!.name }))
+        )
+      );
       setGrapeNotes(
         grapeRows
           .filter((row) => row.grapes?.name && row.grapes?.notes)
@@ -639,12 +642,38 @@ export default function WineDetailPage() {
 
   const generalPhotos = photos.filter(p => p.tasting_id === null);
 
-  const metaEntries = [
-    wine.producer_id && wine.producers?.name ? { label: wine.producers.name, href: `/knowledge/producers/${wine.producer_id}` } : wine.producers?.name ? { label: wine.producers.name, href: null } : null,
-    wine.subregion_id && wine.subregions?.name ? { label: wine.subregions.name, href: `/knowledge/subregions/${wine.subregion_id}` } : wine.subregions?.name ? { label: wine.subregions.name, href: null } : null,
-    wine.region_id && wine.regions?.name ? { label: wine.regions.name, href: `/knowledge/regions/${wine.region_id}` } : wine.regions?.name ? { label: wine.regions.name, href: null } : null,
-    wine.country_id && wine.countries?.name ? { label: wine.countries.name, href: `/knowledge/countries/${wine.country_id}` } : wine.countries?.name ? { label: wine.countries.name, href: null } : null,
-  ].filter((e): e is { label: string; href: string | null } => e !== null && Boolean(e.label));
+  const metaItems = [
+    wine.vintage_year !== null
+      ? { label: String(wine.vintage_year), href: `/knowledge/vintages/${wine.vintage_year}` }
+      : { label: "NV" },
+    wine.wine_type
+      ? { label: wine.wine_type === "rose" ? "Rosé" : wine.wine_type.charAt(0).toUpperCase() + wine.wine_type.slice(1) }
+      : null,
+    wine.producer_id && wine.producers?.name
+      ? { label: wine.producers.name, href: `/knowledge/producers/${wine.producer_id}` }
+      : wine.producers?.name
+        ? { label: wine.producers.name }
+        : null,
+    wine.subregion_id && wine.subregions?.name
+      ? { label: wine.subregions.name, href: `/knowledge/subregions/${wine.subregion_id}` }
+      : wine.subregions?.name
+        ? { label: wine.subregions.name }
+        : null,
+    wine.region_id && wine.regions?.name
+      ? { label: wine.regions.name, href: `/knowledge/regions/${wine.region_id}` }
+      : wine.regions?.name
+        ? { label: wine.regions.name }
+        : null,
+    wine.country_id && wine.countries?.name
+      ? { label: wine.countries.name, href: `/knowledge/countries/${wine.country_id}` }
+      : wine.countries?.name
+        ? { label: wine.countries.name }
+        : null,
+  ].filter((item): item is WineMetaBarItem => item !== null && Boolean(item.label));
+  const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
+    label: grape.name,
+    href: `/knowledge/grapes/${grape.id}`,
+  }));
 
   return (
     <PageShell>
@@ -664,37 +693,8 @@ export default function WineDetailPage() {
                 {wine.name}
               </Link>
             </PageTitle>
-            <PageIntro>
-              <span className="inline-flex flex-wrap items-center gap-y-0.5">
-                <span>{wine.vintage_year ?? "NV"}</span>
-                {wine.wine_type && (
-                  <>
-                    <span className="mx-1.5 text-stone-400">·</span>
-                    <span className="capitalize">{wine.wine_type === "rose" ? "Rosé" : wine.wine_type}</span>
-                  </>
-                )}
-                {metaEntries.map((entry, i) => (
-                  <Fragment key={i}>
-                    <span className="mx-1.5 text-stone-400">·</span>
-                    {entry.href ? (
-                      <Link href={entry.href} className="inline-flex items-center gap-0.5 underline-offset-2 hover:underline">
-                        {entry.label}
-                        <svg className="h-3 w-3 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                        </svg>
-                      </Link>
-                    ) : (
-                      <span>{entry.label}</span>
-                    )}
-                  </Fragment>
-                ))}
-              </span>
-            </PageIntro>
-            {grapes.length > 0 && (
-              <div className="mt-3">
-                <Badge>{grapes.join(", ")}</Badge>
-              </div>
-            )}
+            <WineMetaBar items={metaItems} />
+            <WineMetaBar items={grapeItems} className="mt-2" />
           </PageHero>
           <Button
             variant="secondary"

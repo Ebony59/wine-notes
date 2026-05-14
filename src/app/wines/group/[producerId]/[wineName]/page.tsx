@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import AutocompleteInput from "@/components/AutocompleteInput";
@@ -17,7 +18,6 @@ import {
   Eyebrow,
   PageContainer,
   PageHero,
-  PageIntro,
   PageShell,
   PageTitle,
 } from "@/components/ui/page-shell";
@@ -27,6 +27,10 @@ type WineVintage = {
   name: string;
   vintage_year: number | null;
   wine_type: string | null;
+  producer_id: number | null;
+  country_id: number | null;
+  region_id: number | null;
+  subregion_id: number | null;
   producers: { name: string } | null;
   countries: { name: string } | null;
   regions: { name: string } | null;
@@ -53,6 +57,17 @@ type WineGroupNote = {
   cover_photo_url: string | null;
 };
 
+type GrapeLink = {
+  grape_id: number;
+  grapes: { name: string } | null;
+};
+
+function normalizeGrapes(values: { id: number; name: string }[]) {
+  return Array.from(
+    new Map(values.map((value) => [value.id, value] as const)).values()
+  ).sort((a, b) => a.name.localeCompare(b.name));
+}
+
 export default function WineGroupPage() {
   const { producerId, wineName } = useParams<{ producerId: string; wineName: string }>();
   const decodedName = decodeURIComponent(wineName);
@@ -60,6 +75,7 @@ export default function WineGroupPage() {
 
   const supabase = useMemo(() => createClient(), []);
   const [vintages, setVintages] = useState<WineVintage[]>([]);
+  const [grapes, setGrapes] = useState<{ id: number; name: string }[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [notes, setNotes] = useState("");
   const [savedNotes, setSavedNotes] = useState<string | null>(null);
@@ -89,7 +105,7 @@ export default function WineGroupPage() {
       // Load all vintages of this wine (same name + producer)
       let winesQuery = supabase
         .from("wines")
-        .select("id, name, vintage_year, wine_type, producers(name), countries(name), regions(name), subregions(name)")
+        .select("id, name, vintage_year, wine_type, producer_id, country_id, region_id, subregion_id, producers(name), countries(name), regions(name), subregions(name)")
         .eq("name", decodedName);
 
       if (numericProducerId !== null) {
@@ -105,12 +121,33 @@ export default function WineGroupPage() {
       // Load all photos for these vintages
       const wineIds = loadedVintages.map((v) => v.id);
       if (wineIds.length > 0) {
-        const { data: photosData } = await supabase
-          .from("wine_photos")
-          .select("id, wine_id, tasting_id, storage_path, external_url")
-          .in("wine_id", wineIds)
-          .order("created_at", { ascending: true });
+        const [{ data: photosData }, { data: grapeData, error: grapeError }] = await Promise.all([
+          supabase
+            .from("wine_photos")
+            .select("id, wine_id, tasting_id, storage_path, external_url")
+            .in("wine_id", wineIds)
+            .order("created_at", { ascending: true }),
+          supabase
+            .from("wine_grapes")
+            .select("grape_id, grapes(name)")
+            .in("wine_id", wineIds),
+        ]);
         setPhotos((photosData ?? []) as Photo[]);
+        if (grapeError) {
+          alert(grapeError.message);
+        } else {
+          const grapeRows = (grapeData ?? []) as unknown as GrapeLink[];
+          setGrapes(
+            normalizeGrapes(
+              grapeRows
+                .filter((row) => row.grapes?.name)
+                .map((row) => ({ id: row.grape_id, name: row.grapes!.name }))
+            )
+          );
+        }
+      } else {
+        setPhotos([]);
+        setGrapes([]);
       }
 
       // Load general notes
@@ -302,6 +339,9 @@ export default function WineGroupPage() {
           ...v,
           name: wineName,
           wine_type: editWineType || null,
+          country_id,
+          region_id,
+          subregion_id,
           countries: countryName ? { name: countryName } : null,
           regions: regionName ? { name: regionName } : null,
           subregions: subregionName ? { name: subregionName } : null,
@@ -343,13 +383,35 @@ export default function WineGroupPage() {
 
   const firstVintage = vintages[0];
   const producerName = firstVintage?.producers?.name;
-  const locationLabel = [
-    firstVintage?.countries?.name,
-    firstVintage?.regions?.name,
-    firstVintage?.subregions?.name,
-  ]
-    .filter(Boolean)
-    .join(" · ");
+  const metaItems = [
+    firstVintage?.wine_type
+      ? { label: firstVintage.wine_type === "rose" ? "Rosé" : firstVintage.wine_type.charAt(0).toUpperCase() + firstVintage.wine_type.slice(1) }
+      : null,
+    firstVintage?.producer_id && producerName
+      ? { label: producerName, href: `/knowledge/producers/${firstVintage.producer_id}` }
+      : producerName
+        ? { label: producerName }
+        : null,
+    firstVintage?.subregion_id && firstVintage.subregions?.name
+      ? { label: firstVintage.subregions.name, href: `/knowledge/subregions/${firstVintage.subregion_id}` }
+      : firstVintage?.subregions?.name
+        ? { label: firstVintage.subregions.name }
+        : null,
+    firstVintage?.region_id && firstVintage.regions?.name
+      ? { label: firstVintage.regions.name, href: `/knowledge/regions/${firstVintage.region_id}` }
+      : firstVintage?.regions?.name
+        ? { label: firstVintage.regions.name }
+        : null,
+    firstVintage?.country_id && firstVintage.countries?.name
+      ? { label: firstVintage.countries.name, href: `/knowledge/countries/${firstVintage.country_id}` }
+      : firstVintage?.countries?.name
+        ? { label: firstVintage.countries.name }
+        : null,
+  ].filter((item): item is WineMetaBarItem => item !== null && Boolean(item.label));
+  const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
+    label: grape.name,
+    href: `/knowledge/grapes/${grape.id}`,
+  }));
 
   // Show the first cover photo found across any vintage
   const coverUrl = groupCoverUrl;
@@ -385,19 +447,8 @@ export default function WineGroupPage() {
               </Link>
             </Eyebrow>
             <PageTitle>{vintages[0]?.name ?? decodedName}</PageTitle>
-            {(producerName || locationLabel || firstVintage?.wine_type) && (
-              <PageIntro>
-                {[
-                  producerName,
-                  firstVintage?.wine_type
-                    ? firstVintage.wine_type === "rose" ? "Rosé" : firstVintage.wine_type.charAt(0).toUpperCase() + firstVintage.wine_type.slice(1)
-                    : null,
-                  locationLabel,
-                ]
-                  .filter(Boolean)
-                  .join(" · ")}
-              </PageIntro>
-            )}
+            <WineMetaBar items={metaItems} />
+            <WineMetaBar items={grapeItems} className="mt-2" />
           </PageHero>
           {vintages.length > 0 && (
             <Button
