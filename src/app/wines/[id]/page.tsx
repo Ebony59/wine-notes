@@ -642,7 +642,7 @@ export default function WineDetailPage() {
 
   const generalPhotos = photos.filter(p => p.tasting_id === null);
 
-  const metaItems = [
+  const rawMetaItems: Array<WineMetaBarItem | null> = [
     wine.vintage_year !== null
       ? { label: String(wine.vintage_year), href: `/knowledge/vintages/${wine.vintage_year}` }
       : { label: "NV" },
@@ -669,7 +669,10 @@ export default function WineDetailPage() {
       : wine.countries?.name
         ? { label: wine.countries.name }
         : null,
-  ].filter((item): item is WineMetaBarItem => item !== null && Boolean(item.label));
+  ];
+  const metaItems = rawMetaItems.filter(
+    (item): item is WineMetaBarItem => item !== null && Boolean(item.label)
+  );
   const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
     label: grape.name,
     href: `/knowledge/grapes/${grape.id}`,

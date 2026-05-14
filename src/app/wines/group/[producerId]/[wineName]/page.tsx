@@ -383,7 +383,7 @@ export default function WineGroupPage() {
 
   const firstVintage = vintages[0];
   const producerName = firstVintage?.producers?.name;
-  const metaItems = [
+  const rawMetaItems: Array<WineMetaBarItem | null> = [
     firstVintage?.wine_type
       ? { label: firstVintage.wine_type === "rose" ? "Rosé" : firstVintage.wine_type.charAt(0).toUpperCase() + firstVintage.wine_type.slice(1) }
       : null,
@@ -407,7 +407,10 @@ export default function WineGroupPage() {
       : firstVintage?.countries?.name
         ? { label: firstVintage.countries.name }
         : null,
-  ].filter((item): item is WineMetaBarItem => item !== null && Boolean(item.label));
+  ];
+  const metaItems = rawMetaItems.filter(
+    (item): item is WineMetaBarItem => item !== null && Boolean(item.label)
+  );
   const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
     label: grape.name,
     href: `/knowledge/grapes/${grape.id}`,
