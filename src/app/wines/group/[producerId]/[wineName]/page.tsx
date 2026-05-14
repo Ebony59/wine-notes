@@ -4,9 +4,14 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
+import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
+import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Eyebrow,
@@ -21,12 +26,18 @@ type WineVintage = {
   id: string;
   name: string;
   vintage_year: number | null;
-  cover_photo_url: string | null;
+  wine_type: string | null;
   producers: { name: string } | null;
   countries: { name: string } | null;
   regions: { name: string } | null;
   subregions: { name: string } | null;
 };
+
+function normalizeField(v: string) {
+  const t = v.trim();
+  if (!t || t.toUpperCase() === "NA") return null;
+  return t;
+}
 
 type Photo = {
   id: string;
@@ -34,6 +45,12 @@ type Photo = {
   tasting_id: string | null;
   storage_path: string | null;
   external_url: string | null;
+};
+
+type WineGroupNote = {
+  id: string;
+  notes: string | null;
+  cover_photo_url: string | null;
 };
 
 export default function WineGroupPage() {
@@ -46,9 +63,19 @@ export default function WineGroupPage() {
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [notes, setNotes] = useState("");
   const [savedNotes, setSavedNotes] = useState<string | null>(null);
+  const [groupCoverUrl, setGroupCoverUrl] = useState<string | null>(null);
   const [editing, setEditing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [redirectHref, setRedirectHref] = useState<string | null>(null);
+
+  // Inline wine detail editing
+  const [editingWine, setEditingWine] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editWineType, setEditWineType] = useState("");
+  const [editCountry, setEditCountry] = useState("NA");
+  const [editRegion, setEditRegion] = useState("NA");
+  const [editSubregion, setEditSubregion] = useState("NA");
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -62,7 +89,7 @@ export default function WineGroupPage() {
       // Load all vintages of this wine (same name + producer)
       let winesQuery = supabase
         .from("wines")
-        .select("id, name, vintage_year, cover_photo_url, producers(name), countries(name), regions(name), subregions(name)")
+        .select("id, name, vintage_year, wine_type, producers(name), countries(name), regions(name), subregions(name)")
         .eq("name", decodedName);
 
       if (numericProducerId !== null) {
@@ -89,7 +116,7 @@ export default function WineGroupPage() {
       // Load general notes
       let notesQuery = supabase
         .from("wine_group_notes")
-        .select("notes")
+        .select("id,notes,cover_photo_url")
         .eq("user_id", uid)
         .eq("wine_name", decodedName);
 
@@ -100,12 +127,19 @@ export default function WineGroupPage() {
       }
 
       const { data: notesData } = await notesQuery.maybeSingle();
-      const existing = notesData?.notes ?? "";
+      const existingNote = (notesData as WineGroupNote | null) ?? null;
+      const existing = existingNote?.notes ?? "";
       setNotes(existing);
       setSavedNotes(existing);
+      setGroupCoverUrl(existingNote?.cover_photo_url ?? null);
       setLoading(false);
     }
   }, [supabase, decodedName, numericProducerId]);
+
+  useEffect(() => {
+    if (!redirectHref) return;
+    location.href = redirectHref;
+  }, [redirectHref]);
 
   function resolvePhotoUrl(p: Photo): string {
     if (p.external_url) return p.external_url;
@@ -115,33 +149,14 @@ export default function WineGroupPage() {
     return "";
   }
 
-  async function setCoverPhoto(p: Photo) {
-    const url = resolvePhotoUrl(p);
-    const { error } = await supabase
-      .from("wines")
-      .update({ cover_photo_url: url })
-      .eq("id", p.wine_id);
-    if (error) { alert(error.message); return; }
-    setVintages((vs) =>
-      vs.map((v) => (v.id === p.wine_id ? { ...v, cover_photo_url: url } : v))
-    );
-  }
-
-  async function removeCover() {
-    const vintage = vintages.find((v) => v.cover_photo_url !== null);
-    if (!vintage) return;
-    const { error } = await supabase.from("wines").update({ cover_photo_url: null }).eq("id", vintage.id);
-    if (error) { alert(error.message); return; }
-    setVintages((vs) => vs.map((v) => (v.id === vintage.id ? { ...v, cover_photo_url: null } : v)));
-  }
-
-  async function saveNotes() {
-    if (!userId) return;
-
+  async function upsertGroupNote(
+    uid: string,
+    values: Partial<Pick<WineGroupNote, "notes" | "cover_photo_url">>
+  ) {
     let selectQuery = supabase
       .from("wine_group_notes")
       .select("id")
-      .eq("user_id", userId)
+      .eq("user_id", uid)
       .eq("wine_name", decodedName);
 
     if (numericProducerId !== null) {
@@ -150,38 +165,185 @@ export default function WineGroupPage() {
       selectQuery = selectQuery.is("producer_id", null);
     }
 
-    const { data: existing } = await selectQuery.maybeSingle();
+    const { data: existing, error: selectError } = await selectQuery.maybeSingle();
+    if (selectError) return { error: selectError };
 
     if (existing?.id) {
-      const { error } = await supabase
-        .from("wine_group_notes")
-        .update({ notes: notes.trim() || null })
-        .eq("id", existing.id);
-      if (error) { alert(error.message); return; }
-    } else {
-      const { error } = await supabase
-        .from("wine_group_notes")
-        .insert({
-          user_id: userId,
-          wine_name: decodedName,
-          producer_id: numericProducerId,
-          notes: notes.trim() || null,
-        });
-      if (error) { alert(error.message); return; }
+      return supabase.from("wine_group_notes").update(values).eq("id", existing.id);
     }
+
+    const payload: {
+      user_id: string;
+      wine_name: string;
+      producer_id: number | null;
+      notes?: string | null;
+      cover_photo_url?: string | null;
+    } = {
+      user_id: uid,
+      wine_name: decodedName,
+      producer_id: numericProducerId,
+    };
+
+    if ("notes" in values) payload.notes = values.notes ?? null;
+    if ("cover_photo_url" in values) payload.cover_photo_url = values.cover_photo_url ?? null;
+
+    return supabase.from("wine_group_notes").insert(payload);
+  }
+
+  async function setCoverPhoto(p: Photo) {
+    if (!userId) return;
+    const url = resolvePhotoUrl(p);
+    const { error } = await upsertGroupNote(userId, { cover_photo_url: url });
+    if (error) { alert(error.message); return; }
+    setGroupCoverUrl(url);
+  }
+
+  async function removeCover() {
+    if (!userId) return;
+    const { error } = await upsertGroupNote(userId, { cover_photo_url: null });
+    if (error) { alert(error.message); return; }
+    setGroupCoverUrl(null);
+  }
+
+  async function saveNotes() {
+    if (!userId) return;
+    const { error } = await upsertGroupNote(userId, { notes: notes.trim() || null });
+    if (error) { alert(error.message); return; }
 
     setSavedNotes(notes.trim());
     setEditing(false);
   }
 
+  function openEditWine() {
+    const first = vintages[0];
+    if (!first) return;
+    setEditName(first.name);
+    setEditWineType(first.wine_type ?? "");
+    setEditCountry(first.countries?.name ?? "NA");
+    setEditRegion(first.regions?.name ?? "NA");
+    setEditSubregion(first.subregions?.name ?? "NA");
+    setEditingWine(true);
+  }
+
+  async function ensureCountryId(name: string): Promise<number> {
+    const { data: ex } = await supabase.from("countries").select("id").eq("name", name).maybeSingle();
+    if (ex?.id) return ex.id;
+    const { data: ins, error } = await supabase.from("countries").insert({ name }).select("id").single();
+    if (error) throw error;
+    return ins.id;
+  }
+
+  async function ensureRegionId(countryId: number, name: string): Promise<number> {
+    const { data: ex } = await supabase.from("regions").select("id").eq("country_id", countryId).eq("name", name).maybeSingle();
+    if (ex?.id) return ex.id;
+    const { data: ins, error } = await supabase.from("regions").insert({ country_id: countryId, name }).select("id").single();
+    if (error) throw error;
+    return ins.id;
+  }
+
+  async function ensureSubregionId(regionId: number, name: string): Promise<number> {
+    const { data: ex } = await supabase.from("subregions").select("id").eq("region_id", regionId).eq("name", name).maybeSingle();
+    if (ex?.id) return ex.id;
+    const { data: ins, error } = await supabase.from("subregions").insert({ region_id: regionId, name }).select("id").single();
+    if (error) throw error;
+    return ins.id;
+  }
+
+  async function saveWineDetails() {
+    const wineName = editName.trim();
+    if (!wineName) return alert("Name is required.");
+
+    const countryName = normalizeField(editCountry);
+    const regionName = normalizeField(editRegion);
+    const subregionName = normalizeField(editSubregion);
+
+    let country_id: number | null = null;
+    let region_id: number | null = null;
+    let subregion_id: number | null = null;
+
+    try {
+      if (countryName) country_id = await ensureCountryId(countryName);
+      if (regionName && country_id) region_id = await ensureRegionId(country_id, regionName);
+      if (subregionName && region_id) subregion_id = await ensureSubregionId(region_id, subregionName);
+
+      const wineIds = vintages.map((v) => v.id);
+      const { error } = await supabase
+        .from("wines")
+        .update({
+          name: wineName,
+          wine_type: editWineType || null,
+          country_id,
+          region_id,
+          subregion_id,
+        })
+        .in("id", wineIds);
+
+      if (error) return alert(error.message);
+
+      if (userId && wineName !== decodedName) {
+        let noteUpdate = supabase
+          .from("wine_group_notes")
+          .update({ wine_name: wineName })
+          .eq("user_id", userId)
+          .eq("wine_name", decodedName);
+
+        if (numericProducerId !== null) {
+          noteUpdate = noteUpdate.eq("producer_id", numericProducerId);
+        } else {
+          noteUpdate = noteUpdate.is("producer_id", null);
+        }
+
+        const { error: noteError } = await noteUpdate;
+        if (noteError) return alert(noteError.message);
+      }
+
+      setVintages((vs) =>
+        vs.map((v) => ({
+          ...v,
+          name: wineName,
+          wine_type: editWineType || null,
+          countries: countryName ? { name: countryName } : null,
+          regions: regionName ? { name: regionName } : null,
+          subregions: subregionName ? { name: subregionName } : null,
+        }))
+      );
+      setEditingWine(false);
+      if (wineName !== decodedName) {
+        setRedirectHref(`/wines/group/${numericProducerId ?? 0}/${encodeURIComponent(wineName)}`);
+      }
+    } catch (err) {
+      alert(err instanceof Error ? err.message : "Failed to save.");
+    }
+  }
+
+  async function autofillFromRegion(regionName: string) {
+    const normalized = normalizeField(regionName);
+    if (!normalized) return;
+    try {
+      const match = await findRegionHierarchy(supabase, normalized, normalizeField(editCountry));
+      if (match?.countryName) setEditCountry(match.countryName);
+    } catch { /* best-effort */ }
+  }
+
+  async function autofillFromSubregion(subregionName: string) {
+    const normalized = normalizeField(subregionName);
+    if (!normalized) return;
+    try {
+      const match = await findSubregionHierarchy(supabase, normalized, normalizeField(editRegion), normalizeField(editCountry));
+      if (!match) return;
+      setEditRegion(match.regionName);
+      if (match.countryName) setEditCountry(match.countryName);
+    } catch { /* best-effort */ }
+  }
+
   function isCover(p: Photo): boolean {
     const url = resolvePhotoUrl(p);
-    return vintages.some((v) => v.id === p.wine_id && v.cover_photo_url === url);
+    return groupCoverUrl === url;
   }
 
   const firstVintage = vintages[0];
   const producerName = firstVintage?.producers?.name;
-  const location = [
+  const locationLabel = [
     firstVintage?.countries?.name,
     firstVintage?.regions?.name,
     firstVintage?.subregions?.name,
@@ -190,7 +352,7 @@ export default function WineGroupPage() {
     .join(" · ");
 
   // Show the first cover photo found across any vintage
-  const coverUrl = vintages.find((v) => v.cover_photo_url)?.cover_photo_url ?? null;
+  const coverUrl = groupCoverUrl;
 
   if (loading) {
     return (
@@ -205,27 +367,135 @@ export default function WineGroupPage() {
   return (
     <PageShell>
       <PageContainer className="max-w-3xl pb-16">
-        <PageHero>
-          <Eyebrow>
-            <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
-              <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3">
-                <path
-                  d="M10 3L5 8l5 5"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              My Wines
-            </Link>
-          </Eyebrow>
-          <PageTitle>{decodedName}</PageTitle>
-          {(producerName || location) && (
-            <PageIntro>{[producerName, location].filter(Boolean).join(" · ")}</PageIntro>
+        <div className="flex items-start justify-between gap-4">
+          <PageHero>
+            <Eyebrow>
+              <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
+                <svg aria-hidden="true" viewBox="0 0 16 16" className="h-3 w-3">
+                  <path
+                    d="M10 3L5 8l5 5"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                My Wines
+              </Link>
+            </Eyebrow>
+            <PageTitle>{vintages[0]?.name ?? decodedName}</PageTitle>
+            {(producerName || locationLabel || firstVintage?.wine_type) && (
+              <PageIntro>
+                {[
+                  producerName,
+                  firstVintage?.wine_type
+                    ? firstVintage.wine_type === "rose" ? "Rosé" : firstVintage.wine_type.charAt(0).toUpperCase() + firstVintage.wine_type.slice(1)
+                    : null,
+                  locationLabel,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </PageIntro>
+            )}
+          </PageHero>
+          {vintages.length > 0 && (
+            <Button
+              variant="secondary"
+              className="mt-4 shrink-0 rounded-2xl px-4"
+              onClick={() => (editingWine ? setEditingWine(false) : openEditWine())}
+            >
+              {editingWine ? "Cancel" : "Edit Wine"}
+            </Button>
           )}
-        </PageHero>
+        </div>
+
+        {editingWine && (
+          <Card className="mt-6">
+            <CardTitle>Edit Wine Details</CardTitle>
+            <div className="mt-5 grid gap-4">
+              <Field>
+                <FieldLabel>Name *</FieldLabel>
+                <Input value={editName} onChange={(e) => setEditName(e.target.value)} />
+              </Field>
+
+              <Field>
+                <FieldLabel>Wine Type</FieldLabel>
+                <div className="flex flex-wrap gap-2">
+                  {(["sparkling", "white", "rose", "red", "fortified"] as const).map((type) => (
+                    <button
+                      key={type}
+                      type="button"
+                      onClick={() => setEditWineType(editWineType === type ? "" : type)}
+                      className={`rounded-full border px-4 py-1.5 text-sm capitalize transition ${
+                        editWineType === type
+                          ? "border-stone-800 bg-stone-800 text-white"
+                          : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                      }`}
+                    >
+                      {type === "rose" ? "Rosé" : type.charAt(0).toUpperCase() + type.slice(1)}
+                    </button>
+                  ))}
+                </div>
+              </Field>
+
+              <Field>
+                <FieldLabel>Country (or NA)</FieldLabel>
+                <AutocompleteInput
+                  value={editCountry}
+                  onChange={setEditCountry}
+                  fetchSuggestions={async (q) => {
+                    const { data } = await supabase.from("countries").select("name").ilike("name", `%${q}%`).limit(8);
+                    return data?.map((d) => d.name) ?? [];
+                  }}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel>Region (or NA)</FieldLabel>
+                <AutocompleteInput
+                  value={editRegion}
+                  onChange={setEditRegion}
+                  onSelect={autofillFromRegion}
+                  fetchSuggestions={async (q) => {
+                    const countryName = editCountry.trim().toUpperCase() !== "NA" ? editCountry.trim() : null;
+                    let qb = supabase.from("regions").select("name").ilike("name", `%${q}%`);
+                    if (countryName) {
+                      const { data: c } = await supabase.from("countries").select("id").eq("name", countryName).maybeSingle();
+                      if (c?.id) qb = qb.eq("country_id", c.id);
+                    }
+                    const { data } = await qb.limit(8);
+                    return data?.map((d) => d.name) ?? [];
+                  }}
+                />
+              </Field>
+
+              <Field>
+                <FieldLabel>Sub-region (or NA)</FieldLabel>
+                <AutocompleteInput
+                  value={editSubregion}
+                  onChange={setEditSubregion}
+                  onSelect={autofillFromSubregion}
+                  fetchSuggestions={async (q) => {
+                    const regionName = editRegion.trim().toUpperCase() !== "NA" ? editRegion.trim() : null;
+                    let qb = supabase.from("subregions").select("name").ilike("name", `%${q}%`);
+                    if (regionName) {
+                      const { data: r } = await supabase.from("regions").select("id").eq("name", regionName).maybeSingle();
+                      if (r?.id) qb = qb.eq("region_id", r.id);
+                    }
+                    const { data } = await qb.limit(8);
+                    return data?.map((d) => d.name) ?? [];
+                  }}
+                />
+              </Field>
+
+              <div className="flex gap-3 pt-1">
+                <Button onClick={saveWineDetails}>Save Changes</Button>
+                <Button variant="secondary" onClick={() => setEditingWine(false)}>Cancel</Button>
+              </div>
+            </div>
+          </Card>
+        )}
 
         {/* Cover photo */}
         {coverUrl && (
@@ -336,67 +606,23 @@ export default function WineGroupPage() {
               </CardDescription>
             </div>
 
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
-              {photos.map((p) => {
-                const url = resolvePhotoUrl(p);
-                const cover = isCover(p);
-                const vintageYear = vintages.find((v) => v.id === p.wine_id)?.vintage_year;
-
-                return (
-                  <Link
-                    key={p.id}
-                    href={`/wines/${p.wine_id}`}
-                    className="group relative block aspect-square overflow-hidden rounded-xl border border-stone-200 bg-stone-100"
-                  >
-                    {/* Photo */}
-                    <img
-                      src={url}
-                      alt=""
-                      className="h-full w-full object-cover transition duration-300 group-hover:scale-[1.04]"
-                    />
-
-                    {/* Dark scrim on hover */}
-                    <div className="absolute inset-0 bg-black/0 transition-colors duration-300 group-hover:bg-black/40" />
-
-                    {/* Vintage label slides up from bottom on hover */}
-                    <div className="pointer-events-none absolute inset-x-0 bottom-0 translate-y-full bg-gradient-to-t from-black/80 to-transparent px-2 pb-2 pt-6 text-xs font-semibold text-white transition-transform duration-300 group-hover:translate-y-0">
-                      {vintageYear ?? "NV"} →
-                    </div>
-
-                    {/* Cover badge — always visible */}
-                    {cover && (
-                      <div className="pointer-events-none absolute left-1.5 top-1.5 flex items-center gap-1 rounded-lg bg-stone-900/85 px-2 py-1 text-[11px] font-semibold text-white shadow-md">
-                        <svg className="h-3 w-3 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="1" y="4" width="14" height="10" rx="2" />
-                          <circle cx="8" cy="9" r="2.5" />
-                          <path d="M5.5 4l1-2h3l1 2" />
-                        </svg>
-                        Cover
-                      </div>
-                    )}
-
-                    {/* Set cover button — always visible, clearly tappable */}
-                    {!cover && (
-                      <button
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          setCoverPhoto(p);
-                        }}
-                        className="absolute right-1.5 top-1.5 flex items-center gap-1 rounded-lg bg-white/95 px-2 py-1 text-[11px] font-semibold text-stone-800 shadow-md transition hover:bg-white active:scale-95 sm:opacity-0 sm:group-hover:opacity-100 opacity-100"
-                      >
-                        <svg className="h-3 w-3 shrink-0" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                          <rect x="1" y="4" width="14" height="10" rx="2" />
-                          <circle cx="8" cy="9" r="2.5" />
-                          <path d="M5.5 4l1-2h3l1 2" />
-                        </svg>
-                        Cover
-                      </button>
-                    )}
-                  </Link>
-                );
+            <CoverPhotoGrid
+              items={photos.map((photo) => {
+                const vintageYear = vintages.find((v) => v.id === photo.wine_id)?.vintage_year;
+                return {
+                  id: photo.id,
+                  url: resolvePhotoUrl(photo),
+                  alt: `${decodedName} ${vintageYear ?? "NV"}`,
+                  href: `/wines/${photo.wine_id}`,
+                  footerLabel: `${vintageYear ?? "NV"} →`,
+                  isCover: isCover(photo),
+                  photo,
+                };
               })}
-            </div>
+              containerClassName="grid grid-cols-3 gap-2 sm:grid-cols-4"
+              itemClassName="aspect-square w-full"
+              onSetCover={(item) => setCoverPhoto(item.photo)}
+            />
           </Card>
         )}
       </PageContainer>

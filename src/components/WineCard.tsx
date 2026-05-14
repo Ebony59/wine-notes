@@ -7,6 +7,7 @@ export type WineCardWine = {
   id: string;
   name: string;
   vintage_year: number | null;
+  wine_type?: string | null;
   producer_id: number | null;
   producers?: { name: string } | null;
   countries?: { name: string } | null;
@@ -87,6 +88,11 @@ export function WineCard<T extends WineCardWine>({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="truncate text-sm font-medium text-stone-900">{primaryWine.name}</div>
+            {primaryWine.wine_type && (
+              <span className="shrink-0 rounded-full border border-stone-200 px-2 py-0.5 text-[11px] text-stone-500 capitalize">
+                {primaryWine.wine_type === "rose" ? "Rosé" : primaryWine.wine_type}
+              </span>
+            )}
             <svg
               aria-hidden="true"
               viewBox="0 0 20 20"

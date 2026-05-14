@@ -70,6 +70,7 @@ export default function AddWinePage() {
   // Wine fields
   const [name, setName] = useState("");
   const [vintage, setVintage] = useState("");
+  const [wineType, setWineType] = useState("");
   const [country, setCountry] = useState("NA");
   const [region, setRegion] = useState("NA");
   const [subregion, setSubregion] = useState("NA");
@@ -528,6 +529,7 @@ export default function AddWinePage() {
         user_id: userId,
         name: wineName,
         vintage_year: vintageYear ?? null,
+        wine_type: wineType || null,
         country_id, region_id, subregion_id, producer_id,
       }).select("id").single();
       if (error) return alert(error.message);
@@ -651,6 +653,26 @@ export default function AddWinePage() {
                 value={vintage}
                 onChange={(e) => setVintage(e.target.value)}
               />
+            </Field>
+
+            <Field>
+              <FieldLabel>Wine Type</FieldLabel>
+              <div className="flex flex-wrap gap-2">
+                {(["sparkling", "white", "rose", "red", "fortified"] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setWineType(wineType === type ? "" : type)}
+                    className={`rounded-full border px-4 py-1.5 text-sm capitalize transition ${
+                      wineType === type
+                        ? "border-stone-800 bg-stone-800 text-white"
+                        : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                    }`}
+                  >
+                    {type === "rose" ? "Rosé" : type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
             </Field>
 
             <Field>

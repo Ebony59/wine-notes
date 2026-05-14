@@ -20,6 +20,7 @@ import {
 } from "@/components/ui/page-shell";
 
 type Wine = WineCardWine & {
+  wine_type?: string | null;
   wine_grapes?: { grapes: { name: string } | null }[] | null;
 };
 
@@ -179,6 +180,7 @@ export default function WinesPage() {
   const [filterRegion, setFilterRegion] = useState("");
   const [filterSubregion, setFilterSubregion] = useState("");
   const [filterGrapes, setFilterGrapes] = useState<string[]>([]);
+  const [filterWineType, setFilterWineType] = useState("");
 
   // Search dropdown state
   const [search, setSearch] = useState("");
@@ -198,7 +200,7 @@ export default function WinesPage() {
     async function loadWines() {
       const { data, error } = await supabase
         .from("wines")
-        .select("id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grapes(name))")
+        .select("id,name,vintage_year,wine_type,producer_id,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grapes(name))")
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -302,6 +304,7 @@ export default function WinesPage() {
         if (filterCountry && w.countries?.name !== filterCountry) return false;
         if (filterRegion && w.regions?.name !== filterRegion) return false;
         if (filterSubregion && w.subregions?.name !== filterSubregion) return false;
+        if (filterWineType && w.wine_type !== filterWineType) return false;
         if (
           filterGrapes.length > 0 &&
           !(w.wine_grapes ?? []).some((entry) =>
@@ -310,7 +313,7 @@ export default function WinesPage() {
         ) return false;
         return true;
       }),
-    [wines, filterCountry, filterRegion, filterSubregion, filterGrapes]
+    [wines, filterCountry, filterRegion, filterSubregion, filterWineType, filterGrapes]
   );
 
   const groupedWines = useMemo(() => {
@@ -379,7 +382,7 @@ export default function WinesPage() {
       .sort((a, b) => a.country.localeCompare(b.country));
   }, [filteredWines]);
 
-  const hasFilters = filterCountry || filterRegion || filterSubregion || filterGrapes.length > 0;
+  const hasFilters = filterCountry || filterRegion || filterSubregion || filterWineType || filterGrapes.length > 0;
 
   function toggleProducer(key: string) {
     setExpandedProducers((current) => ({ ...current, [key]: !current[key] }));
@@ -456,6 +459,7 @@ export default function WinesPage() {
                 setFilterRegion("");
                 setFilterSubregion("");
                 setFilterGrapes([]);
+                setFilterWineType("");
                 setRegionOptions([]);
                 setSubregionOptions([]);
               }}
@@ -502,12 +506,32 @@ export default function WinesPage() {
 
             <div className="mt-2">
               <label className="mb-1 block text-xs text-stone-600">Grape</label>
-          <MultiSearchableSelect
-            values={filterGrapes}
-            onChange={setFilterGrapes}
-            options={grapeOptions}
-            placeholder="Select grapes"
-          />
+              <MultiSearchableSelect
+                values={filterGrapes}
+                onChange={setFilterGrapes}
+                options={grapeOptions}
+                placeholder="Select grapes"
+              />
+            </div>
+
+            <div className="mt-2">
+              <label className="mb-1 block text-xs text-stone-600">Wine Type</label>
+              <div className="flex flex-wrap gap-2">
+                {(["sparkling", "white", "rose", "red", "fortified"] as const).map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setFilterWineType(filterWineType === type ? "" : type)}
+                    className={`rounded-full border px-3 py-1 text-xs capitalize transition ${
+                      filterWineType === type
+                        ? "border-stone-800 bg-stone-800 text-white"
+                        : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                    }`}
+                  >
+                    {type === "rose" ? "Rosé" : type.charAt(0).toUpperCase() + type.slice(1)}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </Card>

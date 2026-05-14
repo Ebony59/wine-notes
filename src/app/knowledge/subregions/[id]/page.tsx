@@ -7,6 +7,7 @@ import { WineCard, groupWinesForCards, type WineCardWine } from "@/components/Wi
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
 import { CoverPhoto } from "@/components/CoverPhoto";
+import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
@@ -277,25 +278,22 @@ export default function SubregionDetailPage() {
           <CardTitle className="text-2xl">Photos</CardTitle>
           <CardDescription className="mt-2">Select one photo as the label photo — it will appear at the top of this page.</CardDescription>
           {photos.length > 0 && (
-            <div className="mt-4 flex flex-wrap gap-2">
-              {photos.map(p => {
-                const url = resolveUrl(p);
-                const isLabel = subregion.cover_photo_url === url;
-                return (
-                  <div key={p.id} className="group relative">
-                    <button type="button" onClick={() => setExpandedPhoto(p)} className={`block h-24 w-24 overflow-hidden rounded-xl border-2 ${isLabel ? "border-stone-800" : "border-transparent"}`}>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={url} alt="" className="h-full w-full object-cover" />
-                    </button>
-                    {isLabel && <div className="absolute left-1 top-1 rounded bg-stone-800 px-1 text-[10px] font-medium text-white">label</div>}
-                    <div className="absolute inset-0 flex flex-col items-center justify-center gap-1 rounded-xl bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
-                      {!isLabel && <button onClick={() => setLabelPhoto(p)} className="text-[11px] font-medium text-white underline">Set as label</button>}
-                      <button onClick={() => deletePhoto(p)} className="text-[11px] text-rose-300 underline">Delete</button>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
+            <CoverPhotoGrid
+              items={photos.map((photo) => ({
+                id: photo.id,
+                url: resolveUrl(photo),
+                alt: subregion.name,
+                isCover: subregion.cover_photo_url === resolveUrl(photo),
+                photo,
+              }))}
+              containerClassName="mt-4"
+              itemClassName="h-24 w-24 shrink-0"
+              coverBadgeText="Label"
+              setCoverText="Set as label"
+              onOpen={(item) => setExpandedPhoto(item.photo)}
+              onSetCover={(item) => setLabelPhoto(item.photo)}
+              onDelete={(item) => deletePhoto(item.photo)}
+            />
           )}
           {photos.length === 0 && pendingPhotos.length === 0 && <p className="mt-3 text-sm text-stone-500">No photos yet.</p>}
           <div className="mt-4"><PhotoPicker onChange={setPendingPhotos} /></div>

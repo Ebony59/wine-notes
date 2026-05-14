@@ -682,7 +682,7 @@ function VintageKnowledgeCard({
                           onUpdate={(year, notes) => onUpdate(group.region.id, year, notes)}
                           onDelete={(year) => onDelete(group.region.id, year)}
                           compact
-                          linkHref={`/knowledge/regions/${group.region.id}#vintage-notes`}
+                          getItemHref={(year) => `/knowledge/vintages/${year}`}
                         />
                       </div>
                     )}

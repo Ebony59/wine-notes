@@ -22,7 +22,9 @@ type VintageNotesListProps = {
   onUpdate: (year: number, notes: string) => Promise<void>;
   onDelete: (year: number) => Promise<void>;
   compact?: boolean;
+  /** @deprecated use getItemHref instead */
   linkHref?: string;
+  getItemHref?: (year: number) => string;
 };
 
 function parseVintageYear(value: string) {
@@ -44,6 +46,7 @@ export function VintageNotesList({
   onDelete,
   compact = false,
   linkHref,
+  getItemHref,
 }: VintageNotesListProps) {
   const [adding, setAdding] = useState(false);
   const [addYear, setAddYear] = useState("");
@@ -169,9 +172,9 @@ export function VintageNotesList({
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
-                    {linkHref ? (
+                    {(getItemHref || linkHref) ? (
                       <Link
-                        href={linkHref}
+                        href={getItemHref ? getItemHref(item.year) : linkHref!}
                         className="inline-flex items-center gap-1 text-sm font-medium text-stone-900 underline-offset-2 hover:underline"
                       >
                         {item.year}
