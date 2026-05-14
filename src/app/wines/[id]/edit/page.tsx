@@ -6,11 +6,18 @@ import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import AutocompleteInput from "@/components/AutocompleteInput";
-import TagAutocompleteInput from "@/components/TagAutocompleteInput";
+import GrapeTagInput from "@/components/GrapeTagInput";
 import { Button } from "@/components/ui/button";
 import { Card, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import {
+  grapeTagFromWineRow,
+  resolveGrapeTagForSave,
+  searchGrapeSuggestions,
+  type GrapeTag,
+  type WineGrapeRow,
+} from "@/lib/grape-utils";
 import {
   Eyebrow,
   PageContainer,
@@ -24,10 +31,6 @@ function normalizeField(v: string) {
   const t = v.trim();
   if (!t || t.toUpperCase() === "NA") return null;
   return t;
-}
-
-function normalizeGrapeList(values: string[]) {
-  return Array.from(new Set(values)).sort((a, b) => a.localeCompare(b));
 }
 
 function normalizeVintage(v: string): number | null | typeof NaN {
@@ -47,10 +50,6 @@ type EditableWine = {
   subregions: { name: string } | null;
 };
 
-type EditableGrapeRow = {
-  grapes: { name: string } | null;
-};
-
 export default function EditWinePage() {
   const { id } = useParams<{ id: string }>();
   const supabase = useMemo(() => createClient(), []);
@@ -66,7 +65,7 @@ export default function EditWinePage() {
   const [region, setRegion] = useState("NA");
   const [subregion, setSubregion] = useState("NA");
   const [producer, setProducer] = useState("NA");
-  const [grapes, setGrapes] = useState<string[]>([]);
+  const [grapes, setGrapes] = useState<GrapeTag[]>([]);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -98,15 +97,15 @@ export default function EditWinePage() {
 
       const { data: grapeLinks, error: grapeError } = await supabase
         .from("wine_grapes")
-        .select("grapes(name)")
+        .select("grape_id,display_name,grapes(name)")
         .eq("wine_id", id);
 
       if (grapeError) { alert(grapeError.message); return; }
-      setGrapes(normalizeGrapeList(
-        ((grapeLinks ?? []) as unknown as EditableGrapeRow[])
-          .map((row) => row.grapes?.name)
-          .filter((value: string | null | undefined): value is string => Boolean(value))
-      ));
+      setGrapes(
+        ((grapeLinks ?? []) as unknown as WineGrapeRow[])
+          .filter((row) => row.grapes?.name)
+          .map((row) => grapeTagFromWineRow(row))
+      );
       setLoaded(true);
     }
   }, [supabase, id]);
@@ -281,14 +280,6 @@ export default function EditWinePage() {
     return ins.id;
   }
 
-  async function ensureGrapeId(n: string): Promise<number> {
-    const { data: ex } = await supabase.from("grapes").select("id").eq("name", n).maybeSingle();
-    if (ex?.id) return ex.id;
-    const { data: ins, error } = await supabase.from("grapes").insert({ name: n }).select("id").single();
-    if (error) throw error;
-    return ins.id;
-  }
-
   async function deleteWine() {
     try {
       const { error: deleteGrapesError } = await supabase.from("wine_grapes").delete().eq("wine_id", id);
@@ -338,9 +329,13 @@ export default function EditWinePage() {
       if (deleteGrapesError) return alert(deleteGrapesError.message);
 
       if (grapes.length > 0) {
-        const grapeIds = await Promise.all(grapes.map((grape) => ensureGrapeId(grape)));
+        const resolvedGrapes = await Promise.all(grapes.map((grape) => resolveGrapeTagForSave(supabase, grape)));
         const { error: insertGrapesError } = await supabase.from("wine_grapes").insert(
-          grapeIds.map((grapeId) => ({ wine_id: id, grape_id: grapeId }))
+          resolvedGrapes.map((grape) => ({
+            wine_id: id,
+            grape_id: grape.grapeId,
+            display_name: grape.displayName,
+          }))
         );
         if (insertGrapesError) return alert(insertGrapesError.message);
       }
@@ -484,18 +479,11 @@ export default function EditWinePage() {
 
             <Field>
               <FieldLabel>Grapes</FieldLabel>
-            <TagAutocompleteInput
-              values={grapes}
+            <GrapeTagInput
+              value={grapes}
               onChange={setGrapes}
               placeholder="e.g. Cabernet Sauvignon"
-              fetchSuggestions={async (q) => {
-                const { data } = await supabase
-                  .from("grapes")
-                  .select("name")
-                  .ilike("name", `%${q}%`)
-                  .limit(8);
-                return data?.map((d) => d.name) ?? [];
-              }}
+              fetchSuggestions={(q) => searchGrapeSuggestions(supabase, q)}
             />
             </Field>
 

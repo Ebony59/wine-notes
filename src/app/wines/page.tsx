@@ -7,6 +7,7 @@ import { WineCard, type WineCardWine, getWineGroupHref } from "@/components/Wine
 import { createClient } from "@/lib/supabase/client";
 import MultiSearchableSelect from "@/components/MultiSearchableSelect";
 import SearchableSelect from "@/components/SearchableSelect";
+import { loadCanonicalGrapeFilterOptions } from "@/lib/grape-utils";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -21,7 +22,7 @@ import {
 
 type Wine = WineCardWine & {
   wine_type?: string | null;
-  wine_grapes?: { grapes: { name: string } | null }[] | null;
+  wine_grapes?: { grape_id: number; display_name: string | null; grapes: { name: string } | null }[] | null;
 };
 
 function wineLocation(w: Wine) {
@@ -173,7 +174,7 @@ export default function WinesPage() {
   const [countryOptions, setCountryOptions] = useState<string[]>([]);
   const [regionOptions, setRegionOptions] = useState<string[]>([]);
   const [subregionOptions, setSubregionOptions] = useState<string[]>([]);
-  const [grapeOptions, setGrapeOptions] = useState<string[]>([]);
+  const [grapeOptions, setGrapeOptions] = useState<{ value: string; label: string; searchText: string }[]>([]);
 
   // Filter state
   const [filterCountry, setFilterCountry] = useState("");
@@ -200,7 +201,7 @@ export default function WinesPage() {
     async function loadWines() {
       const { data, error } = await supabase
         .from("wines")
-        .select("id,name,vintage_year,wine_type,producer_id,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grapes(name))")
+        .select("id,name,vintage_year,wine_type,producer_id,producers(name),countries(name),regions(name),subregions(name),wine_grapes(grape_id,display_name,grapes(name))")
         .order("created_at", { ascending: false })
         .limit(50);
 
@@ -217,11 +218,7 @@ export default function WinesPage() {
     }
 
     async function loadGrapes() {
-      const { data } = await supabase
-        .from("grapes")
-        .select("name")
-        .order("name");
-      setGrapeOptions(data?.map((d) => d.name) ?? []);
+      setGrapeOptions(await loadCanonicalGrapeFilterOptions(supabase));
     }
   }, [supabase]);
 
@@ -308,7 +305,7 @@ export default function WinesPage() {
         if (
           filterGrapes.length > 0 &&
           !(w.wine_grapes ?? []).some((entry) =>
-            entry.grapes?.name ? filterGrapes.includes(entry.grapes.name) : false
+            filterGrapes.includes(String(entry.grape_id))
           )
         ) return false;
         return true;

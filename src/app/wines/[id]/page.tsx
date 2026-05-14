@@ -8,6 +8,7 @@ import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
@@ -41,11 +42,6 @@ type Wine = {
   countries: { name: string; notes: string | null } | null;
   regions: { name: string; notes: string | null } | null;
   subregions: { name: string; notes: string | null } | null;
-};
-
-type GrapeLink = {
-  grape_id: number;
-  grapes: { name: string; notes: string | null } | null;
 };
 
 type Tasting = {
@@ -84,10 +80,10 @@ function fmtDate(d: string | null) {
   });
 }
 
-function normalizeGrapes(values: { id: number; name: string }[]) {
+function normalizeGrapes(values: { id: number; displayName: string; canonicalName: string }[]) {
   return Array.from(
-    new Map(values.map((value) => [value.id, value] as const)).values()
-  ).sort((a, b) => a.name.localeCompare(b.name));
+    new Map(values.map((value) => [`${value.id}:${value.displayName}`, value] as const)).values()
+  ).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 function normalizeField(v: string) {
@@ -112,8 +108,8 @@ export default function WineDetailPage() {
   const [tastings, setTastings] = useState<Tasting[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [similar, setSimilar] = useState<SimilarWine[]>([]);
-  const [grapes, setGrapes] = useState<{ id: number; name: string }[]>([]);
-  const [grapeNotes, setGrapeNotes] = useState<{ id: number; name: string; notes: string }[]>([]);
+  const [grapes, setGrapes] = useState<{ id: number; displayName: string; canonicalName: string }[]>([]);
+  const [grapeNotes, setGrapeNotes] = useState<{ id: number; displayName: string; canonicalName: string; notes: string }[]>([]);
   const [vintageNote, setVintageNote] = useState<VintageKnowledge | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
@@ -181,7 +177,7 @@ export default function WineDetailPage() {
           .order("created_at", { ascending: true }),
         supabase
           .from("wine_grapes")
-          .select("grape_id, grapes(name,notes)")
+          .select("grape_id,display_name,grapes(name,notes)")
           .eq("wine_id", id),
         wTyped.region_id && wTyped.vintage_year !== null
           ? supabase
@@ -196,19 +192,28 @@ export default function WineDetailPage() {
       setTastings((ts ?? []) as Tasting[]);
       setPhotos((ps ?? []) as Photo[]);
       if (grapeError) { alert(grapeError.message); return; }
-      const grapeRows = (grapeLinks ?? []) as unknown as GrapeLink[];
+      const grapeRows = (grapeLinks ?? []) as unknown as WineGrapeRow[];
       setGrapes(
         normalizeGrapes(
           grapeRows
             .filter((row) => row.grapes?.name)
-            .map((row) => ({ id: row.grape_id, name: row.grapes!.name }))
+            .map((row) => ({
+              id: row.grape_id,
+              displayName: row.display_name ?? row.grapes!.name,
+              canonicalName: row.grapes!.name,
+            }))
         )
       );
       setGrapeNotes(
         grapeRows
           .filter((row) => row.grapes?.name && row.grapes?.notes)
-          .map((row) => ({ id: row.grape_id, name: row.grapes!.name, notes: row.grapes!.notes! }))
-          .sort((a, b) => a.name.localeCompare(b.name))
+          .map((row) => ({
+            id: row.grape_id,
+            displayName: row.display_name ?? row.grapes!.name,
+            canonicalName: row.grapes!.name,
+            notes: row.grapes!.notes!,
+          }))
+          .sort((a, b) => a.displayName.localeCompare(b.displayName))
       );
       if (vintageRes.error) { alert(vintageRes.error.message); return; }
       setVintageNote((vintageRes.data as VintageKnowledge | null) ?? null);
@@ -674,7 +679,7 @@ export default function WineDetailPage() {
     (item): item is WineMetaBarItem => item !== null && Boolean(item.label)
   );
   const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
-    label: grape.name,
+    label: formatGrapeDisplayName(grape.displayName, grape.canonicalName),
     href: `/knowledge/grapes/${grape.id}`,
   }));
 
@@ -1034,10 +1039,10 @@ export default function WineDetailPage() {
                 <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{wine.subregions.notes}</p>
               </div>
             )}
-            {grapeNotes.map(({ id: grapeId, name, notes }) => (
-              <div key={name}>
+            {grapeNotes.map(({ id: grapeId, displayName, canonicalName, notes }) => (
+              <div key={`${grapeId}-${displayName}`}>
                 <Link href={`/knowledge/grapes/${grapeId}`} className="mb-1 inline-flex items-center gap-0.5 text-xs font-semibold uppercase tracking-wide text-stone-400 underline-offset-2 hover:text-stone-600 hover:underline">
-                  {name}
+                  {formatGrapeDisplayName(displayName, canonicalName)}
                   <svg className="h-3 w-3 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}><path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" /></svg>
                 </Link>
                 <p className="text-sm leading-relaxed text-stone-800 whitespace-pre-wrap">{notes}</p>

@@ -7,7 +7,11 @@ import { cn } from "@/lib/utils";
 type Props = {
   values: string[];
   onChange: (values: string[]) => void;
-  options: string[];
+  options: {
+    value: string;
+    label: string;
+    searchText?: string;
+  }[];
   placeholder?: string;
 };
 
@@ -36,12 +40,13 @@ export default function MultiSearchableSelect({
 
   const filteredOptions = useMemo(() => {
     const selected = new Set(values.map((value) => value.toLowerCase()));
-    const remainingOptions = options.filter((option) => !selected.has(option.toLowerCase()));
-    const trimmed = query.trim().toLowerCase();
+    const remainingOptions = options.filter((option) => !selected.has(option.value.toLowerCase()));
+    const trimmed = query.trim();
 
     if (!trimmed) return remainingOptions;
 
     const fuse = new Fuse(remainingOptions, {
+      keys: ["label", "searchText"],
       threshold: 0.35,
       ignoreLocation: true,
     });
@@ -94,7 +99,7 @@ export default function MultiSearchableSelect({
       setActiveIndex((index) => Math.max(index - 1, -1));
     } else if (e.key === "Enter") {
       e.preventDefault();
-      if (activeIndex >= 0) addValue(filteredOptions[activeIndex]);
+      if (activeIndex >= 0) addValue(filteredOptions[activeIndex].value);
     } else if (e.key === "Escape") {
       e.preventDefault();
       setOpen(false);
@@ -106,22 +111,27 @@ export default function MultiSearchableSelect({
     <div ref={containerRef} className="relative">
       <div className="rounded-2xl border border-stone-300 bg-stone-50 shadow-sm transition focus-within:border-stone-500 focus-within:bg-white">
         <div className="flex flex-wrap items-center gap-2 px-4 py-3">
-          {values.map((value) => (
+          {values.map((value) => {
+            const option = options.find((entry) => entry.value === value);
+            const label = option?.label ?? value;
+
+            return (
             <span
               key={value}
               className="inline-flex items-center gap-1 rounded-full border border-stone-200 bg-white px-2.5 py-1 text-xs text-stone-700"
             >
-              {value}
+              {label}
               <button
                 type="button"
                 className="text-stone-500 hover:text-stone-700"
                 onClick={() => removeValue(value)}
-                aria-label={`Remove ${value}`}
+                aria-label={`Remove ${label}`}
               >
                 ×
               </button>
             </span>
-          ))}
+            );
+          })}
 
           <input
             className="min-w-[8rem] flex-1 border-0 bg-transparent p-0 text-sm text-stone-900 outline-none placeholder:text-stone-500"
@@ -178,7 +188,7 @@ export default function MultiSearchableSelect({
           </li>
 
           {filteredOptions.map((option, index) => (
-            <li key={option}>
+            <li key={option.value}>
               <button
                 type="button"
                 className={cn(
@@ -187,10 +197,13 @@ export default function MultiSearchableSelect({
                 )}
                 onMouseDown={(e) => {
                   e.preventDefault();
-                  addValue(option);
+                  addValue(option.value);
                 }}
               >
-                {option}
+                <div>{option.label}</div>
+                {option.searchText && option.searchText !== option.label && (
+                  <div className="mt-0.5 text-xs text-stone-500">{option.searchText}</div>
+                )}
               </button>
             </li>
           ))}

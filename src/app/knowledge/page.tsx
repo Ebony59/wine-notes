@@ -4,6 +4,7 @@ import Fuse from "fuse.js";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { findExactGrapeSuggestion, sameGrapeName } from "@/lib/grape-utils";
 import { VintageNotesList, type VintageNoteItem } from "@/components/VintageNotesList";
 import SearchableSelect from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
@@ -47,6 +48,7 @@ type Grape = {
   id: number;
   name: string;
   notes: string | null;
+  grape_aliases?: { name: string }[] | null;
 };
 
 type Producer = {
@@ -720,7 +722,7 @@ export default function KnowledgePage() {
       supabase.from("countries").select("id,name,notes").order("name"),
       supabase.from("regions").select("id,name,country_id,notes,countries(name)").order("name"),
       supabase.from("subregions").select("id,name,region_id,notes,regions(name)").order("name"),
-      supabase.from("grapes").select("id,name,notes").order("name"),
+      supabase.from("grapes").select("id,name,notes,grape_aliases(name)").order("name"),
       supabase.from("producers").select("id,name,region_id,notes,regions(name)").order("name"),
       supabase.from("vintages").select("region_id,year,notes,regions(name,countries(name))").order("year", { ascending: false }),
     ]);
@@ -869,6 +871,12 @@ export default function KnowledgePage() {
   async function renameGrape(item: { id: number; label: string }) {
     const nextName = prompt("Rename grape", item.label)?.trim();
     if (!nextName || nextName === item.label) return;
+
+    const existing = await findExactGrapeSuggestion(supabase, nextName);
+    if (existing && existing.grapeId !== item.id) {
+      return alert(`"${nextName}" already belongs to ${existing.canonicalName}.`);
+    }
+
     setBusyKey(`grape-rename-${item.id}`);
     const { error } = await supabase.from("grapes").update({ name: nextName }).eq("id", item.id);
     setBusyKey(null);
@@ -995,6 +1003,16 @@ export default function KnowledgePage() {
   }
 
   async function addGrape(name: string) {
+    const existing = await findExactGrapeSuggestion(supabase, name);
+    if (existing) {
+      const sameName = sameGrapeName(existing.canonicalName, name);
+      return alert(
+        sameName
+          ? `"${name}" already exists.`
+          : `"${name}" is already stored as an alias of ${existing.canonicalName}.`
+      );
+    }
+
     const { error } = await supabase.from("grapes").insert({ name });
     if (error) return alert(error.message);
     await loadLookups();
@@ -1054,7 +1072,14 @@ export default function KnowledgePage() {
     label: s.name,
     detail: s.regions?.name ? `Region: ${s.regions.name}` : "Region: NA",
   }));
-  const grapeItems = grapes.map((g) => ({ id: g.id, label: g.name }));
+  const grapeItems = grapes.map((g) => ({
+    id: g.id,
+    label: g.name,
+    detail:
+      g.grape_aliases && g.grape_aliases.length > 0
+        ? `Also known as: ${g.grape_aliases.map((alias) => alias.name).join(", ")}`
+        : undefined,
+  }));
   const groupedProducerItems = Array.from(
     producers.reduce((map, producer) => {
       const linkedRegion = producer.region_id ? (regionLookup.get(producer.region_id) ?? null) : null;

@@ -6,12 +6,14 @@ import { useParams } from "next/navigation";
 import { WineCard, groupWinesForCards, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { findExactGrapeSuggestion, normalizeGrapeName, sameGrapeName } from "@/lib/grape-utils";
 import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Eyebrow,
@@ -27,6 +29,12 @@ type Grape = {
   name: string;
   notes: string | null;
   cover_photo_url: string | null;
+  grape_aliases?: GrapeAlias[] | null;
+};
+
+type GrapeAlias = {
+  id: number;
+  name: string;
 };
 
 type GrapePhoto = {
@@ -58,6 +66,14 @@ export default function GrapeDetailPage() {
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
   const [savingPhotos, setSavingPhotos] = useState(false);
   const [expandedPhoto, setExpandedPhoto] = useState<GrapePhoto | null>(null);
+  const [newAlias, setNewAlias] = useState("");
+  const [savingAlias, setSavingAlias] = useState(false);
+  const [editingPrimaryName, setEditingPrimaryName] = useState(false);
+  const [primaryNameDraft, setPrimaryNameDraft] = useState("");
+  const [savingPrimaryName, setSavingPrimaryName] = useState(false);
+  const [editingAliasId, setEditingAliasId] = useState<number | null>(null);
+  const [aliasDraft, setAliasDraft] = useState("");
+  const [savingAliasId, setSavingAliasId] = useState<number | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
@@ -69,7 +85,7 @@ export default function GrapeDetailPage() {
 
     async function loadAll() {
       const [grapeRes, photosRes, wineGrapesRes] = await Promise.all([
-        supabase.from("grapes").select("id,name,notes,cover_photo_url").eq("id", id).maybeSingle(),
+        supabase.from("grapes").select("id,name,notes,cover_photo_url,grape_aliases(id,name)").eq("id", id).maybeSingle(),
         supabase.from("grape_photos").select("id,storage_path,external_url").eq("grape_id", id).order("created_at", { ascending: true }),
         supabase.from("wine_grapes").select("wines(id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name))").eq("grape_id", id),
       ]);
@@ -162,6 +178,252 @@ export default function GrapeDetailPage() {
     }
   }
 
+  async function addAlias() {
+    if (!grape) return;
+
+    const alias = normalizeGrapeName(newAlias);
+    if (!alias) return;
+    if (sameGrapeName(alias, grape.name)) {
+      setNewAlias("");
+      return;
+    }
+
+    setSavingAlias(true);
+    try {
+      const existing = await findExactGrapeSuggestion(supabase, alias);
+      if (existing && existing.grapeId !== grape.id) {
+        alert(`"${alias}" already belongs to ${existing.canonicalName}.`);
+        setSavingAlias(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from("grape_aliases")
+        .insert({ grape_id: grape.id, name: alias })
+        .select("id,name")
+        .single();
+      setSavingAlias(false);
+      if (error) { alert(error.message); return; }
+      setGrape((current) =>
+        current
+          ? {
+              ...current,
+              grape_aliases: [...(current.grape_aliases ?? []), data as GrapeAlias].sort((a, b) => a.name.localeCompare(b.name)),
+            }
+          : current
+      );
+      setNewAlias("");
+    } catch (error) {
+      setSavingAlias(false);
+      alert(error instanceof Error ? error.message : "Could not save alias.");
+    }
+  }
+
+  async function deleteAlias(alias: GrapeAlias) {
+    if (!confirm(`Delete alias "${alias.name}"?`)) return;
+    const { error } = await supabase.from("grape_aliases").delete().eq("id", alias.id);
+    if (error) { alert(error.message); return; }
+    setGrape((current) =>
+      current
+        ? {
+            ...current,
+            grape_aliases: (current.grape_aliases ?? []).filter((entry) => entry.id !== alias.id),
+          }
+        : current
+    );
+  }
+
+  function beginEditPrimaryName() {
+    if (!grape) return;
+    setPrimaryNameDraft(grape.name);
+    setEditingPrimaryName(true);
+  }
+
+  function cancelEditPrimaryName() {
+    setEditingPrimaryName(false);
+    setPrimaryNameDraft(grape?.name ?? "");
+  }
+
+  async function savePrimaryName() {
+    if (!grape) return;
+
+    const nextName = normalizeGrapeName(primaryNameDraft);
+    if (!nextName) return;
+
+    setSavingPrimaryName(true);
+    try {
+      const existing = await findExactGrapeSuggestion(supabase, nextName);
+      if (existing && existing.grapeId !== grape.id) {
+        alert(`"${nextName}" already belongs to ${existing.canonicalName}.`);
+        setSavingPrimaryName(false);
+        return;
+      }
+
+      const previousName = grape.name;
+      const aliasMatchingNextName = (grape.grape_aliases ?? []).find((alias) => sameGrapeName(alias.name, nextName)) ?? null;
+
+      const { error: updateError } = await supabase
+        .from("grapes")
+        .update({ name: nextName })
+        .eq("id", grape.id);
+      if (updateError) {
+        setSavingPrimaryName(false);
+        alert(updateError.message);
+        return;
+      }
+
+      if (aliasMatchingNextName) {
+        const { error: deleteAliasError } = await supabase
+          .from("grape_aliases")
+          .delete()
+          .eq("id", aliasMatchingNextName.id);
+        if (deleteAliasError) {
+          setSavingPrimaryName(false);
+          alert(deleteAliasError.message);
+          return;
+        }
+      }
+
+      let insertedPreviousAlias: GrapeAlias | null = null;
+      if (
+        !sameGrapeName(previousName, nextName) &&
+        !(grape.grape_aliases ?? []).some(
+          (alias) => alias.id !== aliasMatchingNextName?.id && sameGrapeName(alias.name, previousName)
+        )
+      ) {
+        const { data, error: insertAliasError } = await supabase
+          .from("grape_aliases")
+          .insert({ grape_id: grape.id, name: previousName })
+          .select("id,name")
+          .single();
+        if (insertAliasError) {
+          setSavingPrimaryName(false);
+          alert(insertAliasError.message);
+          return;
+        }
+        insertedPreviousAlias = data as GrapeAlias;
+      }
+
+      setGrape((current) =>
+        current
+          ? {
+              ...current,
+              name: nextName,
+              grape_aliases: [
+                ...(current.grape_aliases ?? []).filter((alias) => alias.id !== aliasMatchingNextName?.id),
+                ...(insertedPreviousAlias ? [insertedPreviousAlias] : []),
+              ].sort((a, b) => a.name.localeCompare(b.name)),
+            }
+          : current
+      );
+      setPrimaryNameDraft(nextName);
+      setEditingPrimaryName(false);
+      setSavingPrimaryName(false);
+    } catch (error) {
+      setSavingPrimaryName(false);
+      alert(error instanceof Error ? error.message : "Could not rename grape.");
+    }
+  }
+
+  function beginEditAlias(alias: GrapeAlias) {
+    setEditingAliasId(alias.id);
+    setAliasDraft(alias.name);
+  }
+
+  function cancelEditAlias() {
+    setEditingAliasId(null);
+    setAliasDraft("");
+  }
+
+  async function saveAliasName(alias: GrapeAlias) {
+    if (!grape) return;
+
+    const nextName = normalizeGrapeName(aliasDraft);
+    if (!nextName) return;
+
+    setSavingAliasId(alias.id);
+    try {
+      const existing = await findExactGrapeSuggestion(supabase, nextName);
+      if (existing && existing.grapeId !== grape.id) {
+        alert(`"${nextName}" already belongs to ${existing.canonicalName}.`);
+        setSavingAliasId(null);
+        return;
+      }
+
+      if (sameGrapeName(nextName, grape.name)) {
+        const { error } = await supabase.from("grape_aliases").delete().eq("id", alias.id);
+        if (error) {
+          setSavingAliasId(null);
+          alert(error.message);
+          return;
+        }
+        setGrape((current) =>
+          current
+            ? {
+                ...current,
+                grape_aliases: (current.grape_aliases ?? []).filter((entry) => entry.id !== alias.id),
+              }
+            : current
+        );
+        setSavingAliasId(null);
+        setEditingAliasId(null);
+        setAliasDraft("");
+        return;
+      }
+
+      const duplicateAlias = (grape.grape_aliases ?? []).find(
+        (entry) => entry.id !== alias.id && sameGrapeName(entry.name, nextName)
+      );
+      if (duplicateAlias) {
+        const { error } = await supabase.from("grape_aliases").delete().eq("id", alias.id);
+        if (error) {
+          setSavingAliasId(null);
+          alert(error.message);
+          return;
+        }
+        setGrape((current) =>
+          current
+            ? {
+                ...current,
+                grape_aliases: (current.grape_aliases ?? []).filter((entry) => entry.id !== alias.id),
+              }
+            : current
+        );
+        setSavingAliasId(null);
+        setEditingAliasId(null);
+        setAliasDraft("");
+        return;
+      }
+
+      const { error } = await supabase
+        .from("grape_aliases")
+        .update({ name: nextName })
+        .eq("id", alias.id);
+      if (error) {
+        setSavingAliasId(null);
+        alert(error.message);
+        return;
+      }
+
+      setGrape((current) =>
+        current
+          ? {
+              ...current,
+              grape_aliases: (current.grape_aliases ?? [])
+                .map((entry) => (entry.id === alias.id ? { ...entry, name: nextName } : entry))
+                .sort((a, b) => a.name.localeCompare(b.name)),
+            }
+          : current
+      );
+      setSavingAliasId(null);
+      setEditingAliasId(null);
+      setAliasDraft("");
+    } catch (error) {
+      setSavingAliasId(null);
+      alert(error instanceof Error ? error.message : "Could not rename alias.");
+    }
+  }
+
   if (notFound) return (
     <PageShell><PageContainer className="max-w-3xl"><p className="text-stone-600">Grape not found.</p></PageContainer></PageShell>
   );
@@ -232,6 +494,138 @@ export default function GrapeDetailPage() {
           ) : (
             <p className="mt-3 text-sm text-stone-500">No notes yet.</p>
           )}
+        </Card>
+
+        <Card className="mt-6">
+          <CardTitle className="text-xl">Names</CardTitle>
+          <div className="mt-4 rounded-2xl border border-stone-200 bg-stone-50 p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-semibold uppercase tracking-wide text-stone-400">Primary name</div>
+                {editingPrimaryName ? (
+                  <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+                    <Input
+                      value={primaryNameDraft}
+                      onChange={(event) => setPrimaryNameDraft(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === "Enter") {
+                          event.preventDefault();
+                          void savePrimaryName();
+                        }
+                        if (event.key === "Escape") {
+                          event.preventDefault();
+                          cancelEditPrimaryName();
+                        }
+                      }}
+                    />
+                    <div className="flex gap-2">
+                      <Button onClick={savePrimaryName} disabled={savingPrimaryName || !primaryNameDraft.trim()}>
+                        {savingPrimaryName ? "Saving…" : "Save"}
+                      </Button>
+                      <Button variant="secondary" onClick={cancelEditPrimaryName} disabled={savingPrimaryName}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-1 text-sm font-medium text-stone-900">{grape.name}</div>
+                )}
+              </div>
+              {!editingPrimaryName && (
+                <button
+                  type="button"
+                  onClick={beginEditPrimaryName}
+                  className="shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+                >
+                  Edit
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-stone-400">Also known as</div>
+            {grape.grape_aliases && grape.grape_aliases.length > 0 ? (
+              <div className="mt-3 space-y-2">
+                {grape.grape_aliases
+                  .slice()
+                  .sort((a, b) => a.name.localeCompare(b.name))
+                  .map((alias) => (
+                    <div
+                      key={alias.id}
+                      className="rounded-2xl border border-stone-200 bg-white px-3 py-2"
+                    >
+                      {editingAliasId === alias.id ? (
+                        <div className="flex flex-col gap-3 sm:flex-row">
+                          <Input
+                            value={aliasDraft}
+                            onChange={(event) => setAliasDraft(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void saveAliasName(alias);
+                              }
+                              if (event.key === "Escape") {
+                                event.preventDefault();
+                                cancelEditAlias();
+                              }
+                            }}
+                          />
+                          <div className="flex gap-2">
+                            <Button onClick={() => void saveAliasName(alias)} disabled={savingAliasId === alias.id || !aliasDraft.trim()}>
+                              {savingAliasId === alias.id ? "Saving…" : "Save"}
+                            </Button>
+                            <Button variant="secondary" onClick={cancelEditAlias} disabled={savingAliasId === alias.id}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm text-stone-700">{alias.name}</span>
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-stone-50"
+                              onClick={() => beginEditAlias(alias)}
+                            >
+                              Edit
+                            </button>
+                            <button
+                              type="button"
+                              className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
+                              onClick={() => deleteAlias(alias)}
+                              aria-label={`Delete alias ${alias.name}`}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  ))}
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-stone-500">No aliases yet.</p>
+            )}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <Input
+              value={newAlias}
+              onChange={(event) => setNewAlias(event.target.value)}
+              placeholder="Add another name for this grape"
+              onKeyDown={(event) => {
+                if (event.key === "Enter") {
+                  event.preventDefault();
+                  void addAlias();
+                }
+              }}
+            />
+            <Button onClick={addAlias} disabled={savingAlias || !newAlias.trim()}>
+              {savingAlias ? "Saving…" : "Add alias"}
+            </Button>
+          </div>
         </Card>
 
         {/* Photos */}

@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
+import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
@@ -57,15 +58,10 @@ type WineGroupNote = {
   cover_photo_url: string | null;
 };
 
-type GrapeLink = {
-  grape_id: number;
-  grapes: { name: string } | null;
-};
-
-function normalizeGrapes(values: { id: number; name: string }[]) {
+function normalizeGrapes(values: { id: number; displayName: string; canonicalName: string }[]) {
   return Array.from(
-    new Map(values.map((value) => [value.id, value] as const)).values()
-  ).sort((a, b) => a.name.localeCompare(b.name));
+    new Map(values.map((value) => [`${value.id}:${value.displayName}`, value] as const)).values()
+  ).sort((a, b) => a.displayName.localeCompare(b.displayName));
 }
 
 export default function WineGroupPage() {
@@ -75,7 +71,7 @@ export default function WineGroupPage() {
 
   const supabase = useMemo(() => createClient(), []);
   const [vintages, setVintages] = useState<WineVintage[]>([]);
-  const [grapes, setGrapes] = useState<{ id: number; name: string }[]>([]);
+  const [grapes, setGrapes] = useState<{ id: number; displayName: string; canonicalName: string }[]>([]);
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [notes, setNotes] = useState("");
   const [savedNotes, setSavedNotes] = useState<string | null>(null);
@@ -129,19 +125,23 @@ export default function WineGroupPage() {
             .order("created_at", { ascending: true }),
           supabase
             .from("wine_grapes")
-            .select("grape_id, grapes(name)")
+            .select("grape_id,display_name,grapes(name)")
             .in("wine_id", wineIds),
         ]);
         setPhotos((photosData ?? []) as Photo[]);
         if (grapeError) {
           alert(grapeError.message);
         } else {
-          const grapeRows = (grapeData ?? []) as unknown as GrapeLink[];
+          const grapeRows = (grapeData ?? []) as unknown as WineGrapeRow[];
           setGrapes(
             normalizeGrapes(
               grapeRows
                 .filter((row) => row.grapes?.name)
-                .map((row) => ({ id: row.grape_id, name: row.grapes!.name }))
+                .map((row) => ({
+                  id: row.grape_id,
+                  displayName: row.display_name ?? row.grapes!.name,
+                  canonicalName: row.grapes!.name,
+                }))
             )
           );
         }
@@ -412,7 +412,7 @@ export default function WineGroupPage() {
     (item): item is WineMetaBarItem => item !== null && Boolean(item.label)
   );
   const grapeItems: WineMetaBarItem[] = grapes.map((grape) => ({
-    label: grape.name,
+    label: formatGrapeDisplayName(grape.displayName, grape.canonicalName),
     href: `/knowledge/grapes/${grape.id}`,
   }));
 
