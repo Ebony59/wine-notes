@@ -63,6 +63,7 @@ export type GrapeFilterOption = {
   value: string;
   label: string;
   searchText: string;
+  detailText?: string;
 };
 
 export type WineGrapeRow = {
@@ -268,11 +269,16 @@ export async function loadCanonicalGrapeFilterOptions(supabase: SupabaseLike): P
     grape_aliases?: { name: string }[] | null;
   };
 
-  return ((data ?? []) as GrapeWithAliases[]).map((row) => ({
-    value: String(row.id),
-    label: row.name,
-    searchText: [row.name, ...(row.grape_aliases ?? []).map((alias) => alias.name)].join(" "),
-  }));
+  return ((data ?? []) as GrapeWithAliases[]).map((row) => {
+    const aliasNames = (row.grape_aliases ?? []).map((alias) => alias.name);
+
+    return {
+      value: String(row.id),
+      label: row.name,
+      searchText: [row.name, ...aliasNames].join(" "),
+      detailText: aliasNames.length > 0 ? [row.name, ...aliasNames].join(" · ") : undefined,
+    };
+  });
 }
 
 async function assertNameAvailableForGrape(supabase: SupabaseLike, rawName: string, grapeId: number) {

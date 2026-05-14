@@ -11,6 +11,7 @@ type Props = {
     value: string;
     label: string;
     searchText?: string;
+    detailText?: string;
   }[];
   placeholder?: string;
 };
@@ -173,7 +174,7 @@ export default function MultiSearchableSelect({
       </div>
 
       {open && (
-        <ul className="absolute z-20 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
+        <ul className="absolute z-50 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           <li>
             <button
               type="button"
@@ -201,8 +202,8 @@ export default function MultiSearchableSelect({
                 }}
               >
                 <div>{option.label}</div>
-                {option.searchText && option.searchText !== option.label && (
-                  <div className="mt-0.5 text-xs text-stone-500">{option.searchText}</div>
+                {(option.detailText || (option.searchText && option.searchText !== option.label)) && (
+                  <div className="mt-0.5 text-xs text-stone-500">{option.detailText ?? option.searchText}</div>
                 )}
               </button>
             </li>

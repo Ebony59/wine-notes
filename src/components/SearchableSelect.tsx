@@ -154,7 +154,7 @@ export default function SearchableSelect({
       </div>
 
       {open && !disabled && (
-        <ul className="absolute z-20 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
+        <ul className="absolute z-50 mt-2 max-h-52 w-full overflow-auto rounded-2xl border border-stone-200 bg-white/95 p-1 shadow-[0_18px_40px_rgba(88,56,34,0.14)] backdrop-blur">
           <li>
             <button
               type="button"

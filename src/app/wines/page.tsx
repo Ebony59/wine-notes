@@ -407,7 +407,7 @@ export default function WinesPage() {
           </PageIntro>
         </PageHero>
 
-        <Card className="mt-8">
+        <Card className="relative z-10 mt-8">
           <div ref={searchRef} className="relative">
             <Input
           type="search"
