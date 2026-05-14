@@ -11,6 +11,7 @@ import { loadCanonicalGrapeFilterOptions } from "@/lib/grape-utils";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { DatePickerInput } from "@/components/ui/date-picker-input";
 import {
   Eyebrow,
   PageContainer,
@@ -182,6 +183,11 @@ export default function WinesPage() {
   const [filterSubregion, setFilterSubregion] = useState("");
   const [filterGrapes, setFilterGrapes] = useState<string[]>([]);
   const [filterWineType, setFilterWineType] = useState("");
+  const [filterDate, setFilterDate] = useState("");
+
+  // Tasting date data for the date filter calendar
+  const [tastingDates, setTastingDates] = useState<Set<string>>(new Set());
+  const [dateToWineIds, setDateToWineIds] = useState<Map<string, Set<string>>>(new Map());
 
   // Search dropdown state
   const [search, setSearch] = useState("");
@@ -195,6 +201,7 @@ export default function WinesPage() {
         loadWines();
         loadCountries();
         loadGrapes();
+        loadTastingDates();
       }
     });
 
@@ -219,6 +226,26 @@ export default function WinesPage() {
 
     async function loadGrapes() {
       setGrapeOptions(await loadCanonicalGrapeFilterOptions(supabase));
+    }
+
+    async function loadTastingDates() {
+      const { data } = await supabase
+        .from("wine_tastings")
+        .select("wine_id, tasted_on")
+        .not("tasted_on", "is", null);
+
+      const dates = new Set<string>();
+      const map = new Map<string, Set<string>>();
+      for (const row of data ?? []) {
+        if (row.tasted_on) {
+          dates.add(row.tasted_on);
+          const ids = map.get(row.tasted_on) ?? new Set<string>();
+          ids.add(row.wine_id);
+          map.set(row.tasted_on, ids);
+        }
+      }
+      setTastingDates(dates);
+      setDateToWineIds(map);
     }
   }, [supabase]);
 
@@ -308,9 +335,13 @@ export default function WinesPage() {
             filterGrapes.includes(String(entry.grape_id))
           )
         ) return false;
+        if (filterDate) {
+          const wineIds = dateToWineIds.get(filterDate);
+          if (!wineIds?.has(w.id)) return false;
+        }
         return true;
       }),
-    [wines, filterCountry, filterRegion, filterSubregion, filterWineType, filterGrapes]
+    [wines, filterCountry, filterRegion, filterSubregion, filterWineType, filterGrapes, filterDate, dateToWineIds]
   );
 
   const groupedWines = useMemo(() => {
@@ -379,7 +410,7 @@ export default function WinesPage() {
       .sort((a, b) => a.country.localeCompare(b.country));
   }, [filteredWines]);
 
-  const hasFilters = filterCountry || filterRegion || filterSubregion || filterWineType || filterGrapes.length > 0;
+  const hasFilters = filterCountry || filterRegion || filterSubregion || filterWineType || filterGrapes.length > 0 || filterDate;
 
   function toggleProducer(key: string) {
     setExpandedProducers((current) => ({ ...current, [key]: !current[key] }));
@@ -457,6 +488,7 @@ export default function WinesPage() {
                 setFilterSubregion("");
                 setFilterGrapes([]);
                 setFilterWineType("");
+                setFilterDate("");
                 setRegionOptions([]);
                 setSubregionOptions([]);
               }}
@@ -529,6 +561,19 @@ export default function WinesPage() {
                   </button>
                 ))}
               </div>
+            </div>
+
+            <div className="mt-2">
+              <label className="mb-1 block text-xs text-stone-600">Date Tasted</label>
+              <DatePickerInput
+                value={filterDate}
+                onChange={setFilterDate}
+                highlightedDates={Array.from(tastingDates)}
+                placeholder="DD/MM/YYYY"
+              />
+              {tastingDates.size === 0 && (
+                <p className="mt-1 text-xs text-stone-400">No tasting dates recorded yet.</p>
+              )}
             </div>
           </div>
         </Card>

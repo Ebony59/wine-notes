@@ -24,3 +24,25 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans);
 }
+
+/* react-day-picker theme overrides for wine notes */
+.rdp-wine-theme .rdp-root {
+  --rdp-accent-color: #1c1917;
+  --rdp-accent-background-color: #e7e5e4;
+  --rdp-today-color: #78716c;
+  --rdp-day-height: 38px;
+  --rdp-day-width: 38px;
+  --rdp-day_button-height: 36px;
+  --rdp-day_button-width: 36px;
+  font-size: 0.875rem;
+}
+
+.rdp-wine-theme .rdp-day-has-tasting .rdp-day_button {
+  background-color: #f5f0eb;
+  font-weight: 600;
+}
+
+.rdp-wine-theme .rdp-day-has-tasting.rdp-selected .rdp-day_button {
+  background-color: #1c1917;
+  color: white;
+}

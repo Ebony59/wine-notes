@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { getWineGroupHref } from "@/components/WineCard";
 import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
+import { WineMetaLine } from "@/components/WineMetaLine";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
@@ -701,8 +702,8 @@ export default function WineDetailPage() {
                 {wine.name}
               </Link>
             </PageTitle>
-            <WineMetaBar items={metaItems} />
-            <WineMetaBar items={grapeItems} className="mt-2" />
+            <WineMetaLine items={metaItems} />
+            {grapeItems.length > 0 && <WineMetaBar items={grapeItems} className="mt-3" />}
           </PageHero>
           <Button
             variant="secondary"

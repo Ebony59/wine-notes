@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
+import { WineMetaLine } from "@/components/WineMetaLine";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
@@ -450,8 +451,8 @@ export default function WineGroupPage() {
               </Link>
             </Eyebrow>
             <PageTitle>{vintages[0]?.name ?? decodedName}</PageTitle>
-            <WineMetaBar items={metaItems} />
-            <WineMetaBar items={grapeItems} className="mt-2" />
+            <WineMetaLine items={metaItems} />
+            {grapeItems.length > 0 && <WineMetaBar items={grapeItems} className="mt-3" />}
           </PageHero>
           {vintages.length > 0 && (
             <Button
