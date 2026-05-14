@@ -32,6 +32,15 @@ function wineLocation(w: Wine) {
     .join(" · ");
 }
 
+function fmtTastingDate(iso: string): string {
+  const [y, m, d] = iso.split("-").map(Number);
+  return new Date(y, m - 1, d).toLocaleDateString("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+  });
+}
+
 type RegionSectionProps = {
   country: string;
   region: string;
@@ -188,6 +197,14 @@ export default function WinesPage() {
   // Tasting date data for the date filter calendar
   const [tastingDates, setTastingDates] = useState<Set<string>>(new Set());
   const [dateToWineIds, setDateToWineIds] = useState<Map<string, Set<string>>>(new Map());
+  // wine id → sorted list of tasted_on dates (desc) for the sort feature
+  const [wineToTastedDates, setWineToTastedDates] = useState<Map<string, string[]>>(new Map());
+  // wine ids that have tastings but no dated ones
+  const [winesWithUndatedTastings, setWinesWithUndatedTastings] = useState<Set<string>>(new Set());
+
+  // Sort state
+  const [sortDateTasted, setSortDateTasted] = useState<"" | "asc" | "desc">("");
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set());
 
   // Search dropdown state
   const [search, setSearch] = useState("");
@@ -231,21 +248,37 @@ export default function WinesPage() {
     async function loadTastingDates() {
       const { data } = await supabase
         .from("wine_tastings")
-        .select("wine_id, tasted_on")
-        .not("tasted_on", "is", null);
+        .select("wine_id, tasted_on");
 
       const dates = new Set<string>();
       const map = new Map<string, Set<string>>();
+      const wineMap = new Map<string, string[]>();
+      const allWineIds = new Set<string>();
       for (const row of data ?? []) {
+        allWineIds.add(row.wine_id);
         if (row.tasted_on) {
           dates.add(row.tasted_on);
           const ids = map.get(row.tasted_on) ?? new Set<string>();
           ids.add(row.wine_id);
           map.set(row.tasted_on, ids);
+          const wineDates = wineMap.get(row.wine_id) ?? [];
+          wineDates.push(row.tasted_on);
+          wineMap.set(row.wine_id, wineDates);
         }
+      }
+      // Sort each wine's dates descending (most recent first)
+      for (const [key, wineDates] of wineMap) {
+        wineMap.set(key, [...wineDates].sort().reverse());
+      }
+      // Wines that have tastings but none with a date
+      const undated = new Set<string>();
+      for (const id of allWineIds) {
+        if (!wineMap.has(id)) undated.add(id);
       }
       setTastingDates(dates);
       setDateToWineIds(map);
+      setWineToTastedDates(wineMap);
+      setWinesWithUndatedTastings(undated);
     }
   }, [supabase]);
 
@@ -410,10 +443,37 @@ export default function WinesPage() {
       .sort((a, b) => a.country.localeCompare(b.country));
   }, [filteredWines]);
 
-  const hasFilters = filterCountry || filterRegion || filterSubregion || filterWineType || filterGrapes.length > 0 || filterDate;
+  const sortedByDateTasted = useMemo(() => {
+    if (!sortDateTasted) return { groups: [] as { date: string; wines: Wine[] }[], undated: [] as Wine[] };
+    const filteredById = new Map(filteredWines.map((w) => [w.id, w]));
+    const groups: { date: string; wines: Wine[] }[] = [];
+    for (const [date, wineIds] of dateToWineIds) {
+      const wines = Array.from(wineIds)
+        .map((id) => filteredById.get(id))
+        .filter((w): w is Wine => w !== undefined);
+      if (wines.length > 0) groups.push({ date, wines });
+    }
+    groups.sort((a, b) =>
+      sortDateTasted === "desc"
+        ? b.date.localeCompare(a.date)
+        : a.date.localeCompare(b.date)
+    );
+    const undated = filteredWines.filter((w) => winesWithUndatedTastings.has(w.id));
+    return { groups, undated };
+  }, [filteredWines, sortDateTasted, dateToWineIds, winesWithUndatedTastings]);
+
+  const hasFilters = filterCountry || filterRegion || filterSubregion || filterWineType || filterGrapes.length > 0 || filterDate || sortDateTasted;
 
   function toggleProducer(key: string) {
     setExpandedProducers((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleDate(date: string) {
+    setExpandedDates((prev) => {
+      const next = new Set(prev);
+      next.has(date) ? next.delete(date) : next.add(date);
+      return next;
+    });
   }
 
   function handleCountryChange(value: string) {
@@ -489,6 +549,8 @@ export default function WinesPage() {
                 setFilterGrapes([]);
                 setFilterWineType("");
                 setFilterDate("");
+                setSortDateTasted("");
+                setExpandedDates(new Set());
                 setRegionOptions([]);
                 setSubregionOptions([]);
               }}
@@ -575,45 +637,177 @@ export default function WinesPage() {
                 <p className="mt-1 text-xs text-stone-400">No tasting dates recorded yet.</p>
               )}
             </div>
+
+            <div className="mt-2">
+              <label className="mb-1 block text-xs text-stone-600">Sort by Date Tasted</label>
+              <div className="flex gap-2">
+                {([
+                  { value: "desc", label: "Newest first" },
+                  { value: "asc", label: "Oldest first" },
+                ] as const).map(({ value, label }) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => setSortDateTasted(sortDateTasted === value ? "" : value)}
+                    className={`rounded-full border px-3 py-1 text-xs transition ${
+                      sortDateTasted === value
+                        ? "border-stone-800 bg-stone-800 text-white"
+                        : "border-stone-300 bg-white text-stone-700 hover:border-stone-400"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         </Card>
 
         <Card className="mt-4">
           <div className="divide-y divide-stone-200">
-          {groupedWines.map((countryGroup) => {
-            return (
-              <div key={countryGroup.country} className="py-4 first:pt-0 last:pb-0">
-                <div className="flex items-center justify-between gap-3">
-                  <div className="text-lg font-semibold text-stone-900">{countryGroup.country}</div>
-                  <Badge>{String(countryGroup.regions.length)} regions</Badge>
+          {sortDateTasted ? (
+            <>
+              {sortedByDateTasted.groups.length === 0 && sortedByDateTasted.undated.length === 0 && (
+                <div className="py-3 text-sm text-stone-600">
+                  No tasted wines match the current filters.
                 </div>
+              )}
 
-                <div className="mt-4 space-y-4">
-                  {countryGroup.regions.map((regionGroup) => (
-                    <RegionSection
-                      key={`${countryGroup.country}|${regionGroup.region}`}
-                      country={countryGroup.country}
-                      region={regionGroup.region}
-                      producers={regionGroup.producers}
-                      expandedProducers={expandedProducers}
-                      onToggleProducer={toggleProducer}
-                    />
-                  ))}
-                </div>
+              <div className="space-y-2">
+                {sortedByDateTasted.groups.map(({ date, wines }) => {
+                  const open = expandedDates.has(date);
+                  return (
+                    <div key={date} className="rounded-2xl border border-stone-200 bg-white/80">
+                      <button
+                        type="button"
+                        onClick={() => toggleDate(date)}
+                        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-stone-50"
+                      >
+                        <div>
+                          <div className="font-medium text-stone-900">{fmtTastingDate(date)}</div>
+                          <div className="mt-0.5 text-xs text-stone-500">{wines.length} {wines.length === 1 ? "wine" : "wines"}</div>
+                        </div>
+                        <svg
+                          aria-hidden="true"
+                          viewBox="0 0 20 20"
+                          className={`h-4 w-4 shrink-0 text-stone-500 transition-transform ${open ? "rotate-180" : ""}`}
+                        >
+                          <path d="M5.5 7.5 10 12l4.5-4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+                        </svg>
+                      </button>
+
+                      {open && (
+                        <div className="max-h-64 overflow-y-auto border-t border-stone-200">
+                          {wines.map((wine) => (
+                            <Link
+                              key={wine.id}
+                              href={`/wines/${wine.id}`}
+                              className="flex items-center justify-between gap-3 px-4 py-2.5 transition hover:bg-stone-50"
+                            >
+                              <div className="min-w-0">
+                                <div className="truncate text-sm font-medium text-stone-900">
+                                  {wine.name}
+                                  {wine.vintage_year && (
+                                    <span className="ml-1.5 font-normal text-stone-500">{wine.vintage_year}</span>
+                                  )}
+                                </div>
+                                <div className="mt-0.5 truncate text-xs text-stone-500">
+                                  {[wine.producers?.name, wineLocation(wine)].filter(Boolean).join(" · ")}
+                                </div>
+                              </div>
+                            </Link>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+
+                {sortedByDateTasted.undated.length > 0 && (
+                  <div className="rounded-2xl border border-stone-200 bg-white/80">
+                    <button
+                      type="button"
+                      onClick={() => toggleDate("__undated__")}
+                      className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-stone-50"
+                    >
+                      <div>
+                        <div className="font-medium text-stone-400">No dates added</div>
+                        <div className="mt-0.5 text-xs text-stone-400">{sortedByDateTasted.undated.length} {sortedByDateTasted.undated.length === 1 ? "wine" : "wines"}</div>
+                      </div>
+                      <svg
+                        aria-hidden="true"
+                        viewBox="0 0 20 20"
+                        className={`h-4 w-4 shrink-0 text-stone-400 transition-transform ${expandedDates.has("__undated__") ? "rotate-180" : ""}`}
+                      >
+                        <path d="M5.5 7.5 10 12l4.5-4.5" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.5" />
+                      </svg>
+                    </button>
+
+                    {expandedDates.has("__undated__") && (
+                      <div className="max-h-64 overflow-y-auto border-t border-stone-200">
+                        {sortedByDateTasted.undated.map((wine) => (
+                          <Link
+                            key={wine.id}
+                            href={`/wines/${wine.id}`}
+                            className="flex items-center gap-3 px-4 py-2.5 transition hover:bg-stone-50"
+                          >
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-medium text-stone-900">
+                                {wine.name}
+                                {wine.vintage_year && (
+                                  <span className="ml-1.5 font-normal text-stone-500">{wine.vintage_year}</span>
+                                )}
+                              </div>
+                              <div className="mt-0.5 truncate text-xs text-stone-500">
+                                {[wine.producers?.name, wineLocation(wine)].filter(Boolean).join(" · ")}
+                              </div>
+                            </div>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
-            );
-          })}
+            </>
+          ) : (
+            <>
+              {groupedWines.map((countryGroup) => {
+                return (
+                  <div key={countryGroup.country} className="py-4 first:pt-0 last:pb-0">
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="text-lg font-semibold text-stone-900">{countryGroup.country}</div>
+                      <Badge>{String(countryGroup.regions.length)} regions</Badge>
+                    </div>
 
-          {filteredWines.length === 0 && wines.length > 0 && (
-            <div className="py-3 text-sm text-stone-600">
-              No wines match the current filters.
-            </div>
-          )}
+                    <div className="mt-4 space-y-4">
+                      {countryGroup.regions.map((regionGroup) => (
+                        <RegionSection
+                          key={`${countryGroup.country}|${regionGroup.region}`}
+                          country={countryGroup.country}
+                          region={regionGroup.region}
+                          producers={regionGroup.producers}
+                          expandedProducers={expandedProducers}
+                          onToggleProducer={toggleProducer}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
 
-          {wines.length === 0 && (
-            <div className="py-3 text-sm text-stone-600">
-              No wines yet — add your first one!
-            </div>
+              {filteredWines.length === 0 && wines.length > 0 && (
+                <div className="py-3 text-sm text-stone-600">
+                  No wines match the current filters.
+                </div>
+              )}
+
+              {wines.length === 0 && (
+                <div className="py-3 text-sm text-stone-600">
+                  No wines yet — add your first one!
+                </div>
+              )}
+            </>
           )}
           </div>
         </Card>
