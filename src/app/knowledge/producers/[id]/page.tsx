@@ -10,9 +10,11 @@ import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
+import { EntitySearchInput, type EntityOption } from "@/components/EntitySearchInput";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Eyebrow,
@@ -45,7 +47,8 @@ type Wine = WineCardWine;
 type Region = {
   id: number;
   name: string;
-  countries: { name: string } | null;
+  country_id: number | null;
+  countries: { id: number; name: string } | null;
 };
 
 // ── Page ───────────────────────────────────────────────────────────────────────
@@ -61,12 +64,22 @@ export default function ProducerDetailPage() {
   const [userId, setUserId] = useState<string | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
 
+  const [editingName, setEditingName] = useState(false);
+  const [nameText, setNameText] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
   // Notes editing
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
+
+  const [allCountries, setAllCountries] = useState<EntityOption[]>([]);
   const [editingLocation, setEditingLocation] = useState(false);
-  const [selectedRegionId, setSelectedRegionId] = useState("");
+  const [regionText, setRegionText] = useState("");
+  const [pendingRegion, setPendingRegion] = useState<Region | null>(null);
+  const [creatingRegionName, setCreatingRegionName] = useState<string | null>(null);
+  const [newRegionCountryText, setNewRegionCountryText] = useState("");
+  const [newRegionPendingCountry, setNewRegionPendingCountry] = useState<EntityOption | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
 
   // Pending photos from PhotoPicker, uploaded on "Save photos"
@@ -85,7 +98,7 @@ export default function ProducerDetailPage() {
     });
 
     async function loadAll() {
-      const [producerRes, photosRes, winesRes, regionsRes] = await Promise.all([
+      const [producerRes, photosRes, winesRes, regionsRes, countriesRes] = await Promise.all([
         supabase.from("producers").select("id,name,region_id,notes,cover_photo_url,regions(name,countries(name))").eq("id", id).maybeSingle(),
         supabase
           .from("producer_photos")
@@ -97,7 +110,8 @@ export default function ProducerDetailPage() {
           .select("id,name,vintage_year,producer_id,producers(name),countries(name),regions(name),subregions(name)")
           .eq("producer_id", id)
           .order("name"),
-        supabase.from("regions").select("id,name,countries(name)").order("name"),
+        supabase.from("regions").select("id,name,country_id,countries(id,name)").order("name"),
+        supabase.from("countries").select("id,name").order("name"),
       ]);
 
       if (producerRes.error) { alert(producerRes.error.message); return; }
@@ -105,12 +119,18 @@ export default function ProducerDetailPage() {
 
       const p = producerRes.data as unknown as Producer;
       setProducer(p);
+      setNameText(p.name);
       setNotesText(p.notes ?? "");
-      setSelectedRegionId(p.region_id?.toString() ?? "");
+      const currentRegion = p.region_id && regionsRes.data
+        ? (regionsRes.data as unknown as Region[]).find(r => r.id === p.region_id) ?? null
+        : null;
+      setRegionText(currentRegion?.name ?? p.regions?.name ?? "");
+      setPendingRegion(currentRegion);
       setPhotos((photosRes.data ?? []) as unknown as ProducerPhoto[]);
       setWines((winesRes.data ?? []) as unknown as Wine[]);
       if (regionsRes.error) { alert(regionsRes.error.message); return; }
       setRegions((regionsRes.data ?? []) as unknown as Region[]);
+      setAllCountries((countriesRes.data ?? []) as EntityOption[]);
     }
   }, [supabase, id]);
 
@@ -150,23 +170,68 @@ export default function ProducerDetailPage() {
     setEditingNotes(false);
   }
 
+  async function saveName() {
+    if (!producer || !nameText.trim()) return;
+    setSavingName(true);
+    const { error } = await supabase.from("producers").update({ name: nameText.trim() }).eq("id", producer.id);
+    setSavingName(false);
+    if (error) { alert(error.message); return; }
+    setProducer(p => p ? { ...p, name: nameText.trim() } : p);
+    setEditingName(false);
+  }
+
   async function saveLocation() {
     if (!producer) return;
-
     setSavingLocation(true);
-    const nextRegionId = selectedRegionId ? Number(selectedRegionId) : null;
-    const { error } = await supabase
-      .from("producers")
-      .update({ region_id: nextRegionId })
-      .eq("id", producer.id);
+
+    let newRegion: Region | null = null;
+
+    if (creatingRegionName) {
+      let country: { id: number; name: string } | null = null;
+      const countryTrimmed = newRegionCountryText.trim();
+      if (countryTrimmed) {
+        if (newRegionPendingCountry && newRegionPendingCountry.name.toLowerCase() === countryTrimmed.toLowerCase()) {
+          country = { id: newRegionPendingCountry.id, name: newRegionPendingCountry.name };
+        } else {
+          const existing = allCountries.find(c => c.name.toLowerCase() === countryTrimmed.toLowerCase());
+          if (existing) {
+            country = { id: existing.id, name: existing.name };
+          } else {
+            const { data, error } = await supabase.from("countries").insert({ name: countryTrimmed }).select("id,name").single();
+            if (error) { alert(error.message); setSavingLocation(false); return; }
+            country = data as { id: number; name: string };
+            setAllCountries(cs => [...cs, { id: country!.id, name: country!.name }].sort((a, b) => a.name.localeCompare(b.name)));
+          }
+        }
+      }
+
+      const { data, error } = await supabase.from("regions").insert({ name: creatingRegionName, country_id: country?.id ?? null }).select("id,name,country_id").single();
+      if (error) { alert(error.message); setSavingLocation(false); return; }
+      const newId = (data as { id: number }).id;
+      newRegion = { id: newId, name: creatingRegionName, country_id: country?.id ?? null, countries: country ? { id: country.id, name: country.name } : null };
+      setRegions(rs => [...rs, newRegion!].sort((a, b) => a.name.localeCompare(b.name)));
+    } else if (pendingRegion) {
+      newRegion = pendingRegion;
+    } else if (!regionText.trim()) {
+      newRegion = null;
+    } else {
+      setSavingLocation(false);
+      alert("Please select a region from the list or create a new one.");
+      return;
+    }
+
+    const { error } = await supabase.from("producers").update({ region_id: newRegion?.id ?? null }).eq("id", producer.id);
     setSavingLocation(false);
     if (error) { alert(error.message); return; }
 
-    const nextRegion = nextRegionId
-      ? (regions.find((region) => region.id === nextRegionId) ?? null)
-      : null;
-
-    setProducer((current) => current ? { ...current, region_id: nextRegionId, regions: nextRegion } : current);
+    setProducer(current => current ? {
+      ...current,
+      region_id: newRegion?.id ?? null,
+      regions: newRegion ? { name: newRegion.name, countries: newRegion.countries ? { name: newRegion.countries.name } : null } : null,
+    } : current);
+    setCreatingRegionName(null);
+    setNewRegionCountryText("");
+    setNewRegionPendingCountry(null);
     setEditingLocation(false);
   }
 
@@ -267,7 +332,36 @@ export default function ProducerDetailPage() {
               My Knowledge
             </Link>
           </Eyebrow>
-          <PageTitle>{producer.name}</PageTitle>
+          {editingName ? (
+            <div className="mt-3 space-y-3">
+              <Input
+                value={nameText}
+                onChange={(e) => setNameText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                className="text-base"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button onClick={saveName} disabled={savingName || !nameText.trim()}>
+                  {savingName ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="secondary" onClick={() => { setEditingName(false); setNameText(producer.name); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <PageTitle>{producer.name}</PageTitle>
+              <button
+                type="button"
+                onClick={() => { setNameText(producer.name); setEditingName(true); }}
+                className="mt-4 shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+              >
+                Rename
+              </button>
+            </div>
+          )}
           {wines.length > 0 && (
             <PageIntro>{wines.length} {wines.length === 1 ? "wine" : "wines"} in your cellar</PageIntro>
           )}
@@ -297,7 +391,12 @@ export default function ProducerDetailPage() {
               <button
                 type="button"
                 onClick={() => {
-                  setSelectedRegionId(producer.region_id?.toString() ?? "");
+                  const current = producer.region_id ? regions.find(r => r.id === producer.region_id) ?? null : null;
+                  setRegionText(current?.name ?? producer.regions?.name ?? "");
+                  setPendingRegion(current);
+                  setCreatingRegionName(null);
+                  setNewRegionCountryText("");
+                  setNewRegionPendingCountry(null);
                   setEditingLocation(true);
                 }}
                 className="shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
@@ -309,35 +408,64 @@ export default function ProducerDetailPage() {
 
           {editingLocation ? (
             <div className="mt-4 space-y-3">
-              <Field>
-                <FieldLabel>Region</FieldLabel>
-                <select
-                  className="w-full rounded-xl border border-stone-300 bg-white px-3 py-2 text-sm text-stone-700 outline-none focus:border-stone-500"
-                  value={selectedRegionId}
-                  onChange={(e) => setSelectedRegionId(e.target.value)}
-                >
-                  <option value="">Unknown</option>
-                  {regions.map((region) => (
-                    <option key={region.id} value={region.id}>
-                      {region.countries?.name ? `${region.name} (${region.countries.name})` : region.name}
-                    </option>
-                  ))}
-                </select>
-              </Field>
-              <div className="flex gap-2">
-                <Button onClick={saveLocation} disabled={savingLocation}>
-                  {savingLocation ? "Saving…" : "Save"}
-                </Button>
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setSelectedRegionId(producer.region_id?.toString() ?? "");
-                    setEditingLocation(false);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
+              {creatingRegionName ? (
+                <>
+                  <div className="rounded-xl bg-stone-50 px-3 py-2 text-sm text-stone-700">
+                    Creating region: <span className="font-medium">{creatingRegionName}</span>
+                  </div>
+                  <Field>
+                    <FieldLabel>Country</FieldLabel>
+                    <EntitySearchInput
+                      options={allCountries}
+                      value={newRegionCountryText}
+                      onChange={setNewRegionCountryText}
+                      onSelect={(opt) => { setNewRegionPendingCountry(opt); setNewRegionCountryText(opt.name); }}
+                      onCreateNew={(name) => { setNewRegionCountryText(name); setNewRegionPendingCountry(null); }}
+                      placeholder="Search or create country…"
+                    />
+                  </Field>
+                  <div className="flex gap-2">
+                    <Button onClick={saveLocation} disabled={savingLocation}>
+                      {savingLocation ? "Saving…" : "Save"}
+                    </Button>
+                    <Button variant="secondary" onClick={() => setCreatingRegionName(null)}>
+                      Back
+                    </Button>
+                    <Button variant="secondary" onClick={() => { setEditingLocation(false); setCreatingRegionName(null); }}>
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <Field>
+                    <FieldLabel>Region</FieldLabel>
+                    <EntitySearchInput
+                      options={regions.map(r => ({ id: r.id, name: r.name, hint: r.countries?.name ? `(${r.countries.name})` : undefined }))}
+                      value={regionText}
+                      onChange={(text) => { setRegionText(text); setPendingRegion(null); }}
+                      onSelect={(opt) => {
+                        const full = regions.find(r => r.id === opt.id) ?? null;
+                        setPendingRegion(full);
+                        setRegionText(opt.name);
+                      }}
+                      onCreateNew={(name) => { setCreatingRegionName(name); setRegionText(name); }}
+                      placeholder="Search or create region…"
+                    />
+                  </Field>
+                  <div className="flex gap-2">
+                    <Button onClick={saveLocation} disabled={savingLocation}>
+                      {savingLocation ? "Saving…" : "Save"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      onClick={() => { setEditingLocation(false); setCreatingRegionName(null); }}
+                    >
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">

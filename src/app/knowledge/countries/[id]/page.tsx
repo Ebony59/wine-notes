@@ -12,6 +12,7 @@ import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { Button } from "@/components/ui/button";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Eyebrow,
@@ -53,6 +54,10 @@ export default function CountryDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
 
+  const [editingName, setEditingName] = useState(false);
+  const [nameText, setNameText] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -82,6 +87,7 @@ export default function CountryDetailPage() {
 
       const c = countryRes.data as unknown as Country;
       setCountry(c);
+      setNameText(c.name);
       setNotesText(c.notes ?? "");
       setPhotos((photosRes.data ?? []) as unknown as CountryPhoto[]);
       setRegions((regionsRes.data ?? []) as unknown as Region[]);
@@ -95,6 +101,16 @@ export default function CountryDetailPage() {
     if (p.external_url) return p.external_url;
     if (p.storage_path) return supabase.storage.from("wine-photos").getPublicUrl(p.storage_path).data.publicUrl;
     return "";
+  }
+
+  async function saveName() {
+    if (!country || !nameText.trim()) return;
+    setSavingName(true);
+    const { error } = await supabase.from("countries").update({ name: nameText.trim() }).eq("id", country.id);
+    setSavingName(false);
+    if (error) { alert(error.message); return; }
+    setCountry(c => c ? { ...c, name: nameText.trim() } : c);
+    setEditingName(false);
   }
 
   async function saveNotes() {
@@ -186,7 +202,36 @@ export default function CountryDetailPage() {
               My Knowledge
             </Link>
           </Eyebrow>
-          <PageTitle>{country.name}</PageTitle>
+          {editingName ? (
+            <div className="mt-3 space-y-3">
+              <Input
+                value={nameText}
+                onChange={(e) => setNameText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                className="text-base"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button onClick={saveName} disabled={savingName || !nameText.trim()}>
+                  {savingName ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="secondary" onClick={() => { setEditingName(false); setNameText(country.name); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <PageTitle>{country.name}</PageTitle>
+              <button
+                type="button"
+                onClick={() => { setNameText(country.name); setEditingName(true); }}
+                className="mt-4 shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+              >
+                Rename
+              </button>
+            </div>
+          )}
           {wines.length > 0 && (
             <PageIntro>{wines.length} {wines.length === 1 ? "wine" : "wines"} in your cellar</PageIntro>
           )}

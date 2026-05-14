@@ -12,9 +12,11 @@ import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import { VintageNotesList, type VintageNoteItem } from "@/components/VintageNotesList";
+import { EntitySearchInput, type EntityOption } from "@/components/EntitySearchInput";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardDescription, CardTitle } from "@/components/ui/card";
+import { Field, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -140,6 +142,16 @@ export default function RegionDetailPage() {
 
   const [producerSearch, setProducerSearch] = useState("");
 
+  const [editingName, setEditingName] = useState(false);
+  const [nameText, setNameText] = useState("");
+  const [savingName, setSavingName] = useState(false);
+
+  const [allCountries, setAllCountries] = useState<EntityOption[]>([]);
+  const [editingCountry, setEditingCountry] = useState(false);
+  const [countryText, setCountryText] = useState("");
+  const [pendingCountry, setPendingCountry] = useState<EntityOption | null>(null);
+  const [savingCountry, setSavingCountry] = useState(false);
+
   const [editingNotes, setEditingNotes] = useState(false);
   const [notesText, setNotesText] = useState("");
   const [savingNotes, setSavingNotes] = useState(false);
@@ -157,13 +169,14 @@ export default function RegionDetailPage() {
     });
 
     async function loadAll() {
-      const [regionRes, photosRes, subregionsRes, producersRes, winesRes, vintagesRes] = await Promise.all([
+      const [regionRes, photosRes, subregionsRes, producersRes, winesRes, vintagesRes, countriesRes] = await Promise.all([
         supabase.from("regions").select("id,name,notes,cover_photo_url,country_id,countries(id,name)").eq("id", id).maybeSingle(),
         supabase.from("region_photos").select("id,storage_path,external_url").eq("region_id", id).order("created_at", { ascending: true }),
         supabase.from("subregions").select("id,name").eq("region_id", id).order("name"),
         supabase.from("producers").select("id,name").eq("region_id", id).order("name"),
         supabase.from("wines").select("id,name,vintage_year,producer_id,producers(id,name),countries(name),regions(name),subregions(name)").eq("region_id", id).order("name"),
         supabase.from("vintages").select("region_id,year,notes").eq("region_id", id).order("year", { ascending: false }),
+        supabase.from("countries").select("id,name").order("name"),
       ]);
 
       if (regionRes.error) { alert(regionRes.error.message); return; }
@@ -171,7 +184,10 @@ export default function RegionDetailPage() {
 
       const r = regionRes.data as unknown as Region;
       setRegion(r);
+      setNameText(r.name);
+      setCountryText(r.countries?.name ?? "");
       setNotesText(r.notes ?? "");
+      setAllCountries((countriesRes.data ?? []) as EntityOption[]);
       setPhotos((photosRes.data ?? []) as unknown as RegionPhoto[]);
       setSubregions((subregionsRes.data ?? []) as unknown as Subregion[]);
       setProducers((producersRes.data ?? []) as unknown as Producer[]);
@@ -179,6 +195,48 @@ export default function RegionDetailPage() {
       setVintages((vintagesRes.data ?? []) as unknown as Vintage[]);
     }
   }, [supabase, id]);
+
+  async function saveName() {
+    if (!region || !nameText.trim()) return;
+    setSavingName(true);
+    const { error } = await supabase.from("regions").update({ name: nameText.trim() }).eq("id", region.id);
+    setSavingName(false);
+    if (error) { alert(error.message); return; }
+    setRegion(r => r ? { ...r, name: nameText.trim() } : r);
+    setEditingName(false);
+  }
+
+  async function saveCountry() {
+    if (!region) return;
+    setSavingCountry(true);
+
+    let newCountry: EntityOption | null = null;
+    const trimmed = countryText.trim();
+
+    if (trimmed) {
+      if (pendingCountry && pendingCountry.name.toLowerCase() === trimmed.toLowerCase()) {
+        newCountry = pendingCountry;
+      } else {
+        const existing = allCountries.find(c => c.name.toLowerCase() === trimmed.toLowerCase());
+        if (existing) {
+          newCountry = existing;
+        } else {
+          const { data, error } = await supabase.from("countries").insert({ name: trimmed }).select("id,name").single();
+          if (error) { alert(error.message); setSavingCountry(false); return; }
+          newCountry = data as EntityOption;
+          setAllCountries(cs => [...cs, newCountry!].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      }
+    }
+
+    const { error } = await supabase.from("regions").update({ country_id: newCountry?.id ?? null }).eq("id", region.id);
+    setSavingCountry(false);
+    if (error) { alert(error.message); return; }
+
+    setRegion(r => r ? { ...r, country_id: newCountry?.id ?? null, countries: newCountry ? { id: newCountry.id, name: newCountry.name } : null } : r);
+    setPendingCountry(null);
+    setEditingCountry(false);
+  }
 
   function resolveUrl(p: RegionPhoto): string {
     if (p.external_url) return p.external_url;
@@ -381,7 +439,36 @@ export default function RegionDetailPage() {
               )}
             </span>
           </Eyebrow>
-          <PageTitle>{region.name}</PageTitle>
+          {editingName ? (
+            <div className="mt-3 space-y-3">
+              <Input
+                value={nameText}
+                onChange={(e) => setNameText(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter") saveName(); if (e.key === "Escape") setEditingName(false); }}
+                className="text-base"
+                autoFocus
+              />
+              <div className="flex gap-2">
+                <Button onClick={saveName} disabled={savingName || !nameText.trim()}>
+                  {savingName ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="secondary" onClick={() => { setEditingName(false); setNameText(region.name); }}>
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          ) : (
+            <div className="flex items-start gap-3">
+              <PageTitle>{region.name}</PageTitle>
+              <button
+                type="button"
+                onClick={() => { setNameText(region.name); setEditingName(true); }}
+                className="mt-4 shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+              >
+                Rename
+              </button>
+            </div>
+          )}
           {wines.length > 0 && (
             <PageIntro>{wines.length} {wines.length === 1 ? "wine" : "wines"} in your cellar</PageIntro>
           )}
@@ -399,19 +486,56 @@ export default function RegionDetailPage() {
         )}
 
         {/* Location */}
-        {countryName && countryId && (
-          <Card className="mt-8">
+        <Card className="mt-8">
+          <div className="flex items-start justify-between gap-3">
             <CardTitle className="text-xl">Location</CardTitle>
-            <div className="mt-4">
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-500">Country</div>
-                <Link href={`/knowledge/countries/${countryId}`} className="mt-1 block text-sm font-medium text-stone-900 underline-offset-2 hover:underline">
-                  {countryName}
-                </Link>
+            {!editingCountry && (
+              <button
+                type="button"
+                onClick={() => { setCountryText(countryName ?? ""); setPendingCountry(countryId ? { id: countryId, name: countryName! } : null); setEditingCountry(true); }}
+                className="shrink-0 rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+              >
+                {countryName ? "Edit" : "+ Add country"}
+              </button>
+            )}
+          </div>
+          {editingCountry ? (
+            <div className="mt-4 space-y-3">
+              <Field>
+                <FieldLabel>Country</FieldLabel>
+                <EntitySearchInput
+                  options={allCountries}
+                  value={countryText}
+                  onChange={setCountryText}
+                  onSelect={(opt) => { setPendingCountry(opt); setCountryText(opt.name); }}
+                  onCreateNew={(name) => { setCountryText(name); setPendingCountry(null); }}
+                  placeholder="Search or create country…"
+                />
+              </Field>
+              <div className="flex gap-2">
+                <Button onClick={saveCountry} disabled={savingCountry}>
+                  {savingCountry ? "Saving…" : "Save"}
+                </Button>
+                <Button variant="secondary" onClick={() => { setEditingCountry(false); setCountryText(countryName ?? ""); setPendingCountry(null); }}>
+                  Cancel
+                </Button>
               </div>
             </div>
-          </Card>
-        )}
+          ) : (
+            <div className="mt-4">
+              {countryName && countryId ? (
+                <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3">
+                  <div className="text-xs uppercase tracking-[0.18em] text-stone-500">Country</div>
+                  <Link href={`/knowledge/countries/${countryId}`} className="mt-1 block text-sm font-medium text-stone-900 underline-offset-2 hover:underline">
+                    {countryName}
+                  </Link>
+                </div>
+              ) : (
+                <p className="text-sm text-stone-500">No country assigned.</p>
+              )}
+            </div>
+          )}
+        </Card>
 
         {/* Notes */}
         <Card className="mt-6">
