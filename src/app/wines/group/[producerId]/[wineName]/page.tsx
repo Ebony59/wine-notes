@@ -7,6 +7,7 @@ import { WineMetaBar, type WineMetaBarItem } from "@/components/WineMetaBar";
 import { WineMetaLine } from "@/components/WineMetaLine";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
@@ -303,6 +304,13 @@ export default function WineGroupPage() {
       if (countryName) country_id = await ensureCountryId(countryName);
       if (regionName && country_id) region_id = await ensureRegionId(country_id, regionName);
       if (subregionName && region_id) subregion_id = await ensureSubregionId(region_id, subregionName);
+      const numericProducerId = Number(producerId);
+      if (numericProducerId > 0 && region_id) {
+        const { error: linkError } = await supabase
+          .from("producer_regions")
+          .upsert({ producer_id: numericProducerId, region_id }, { onConflict: "producer_id,region_id" });
+        if (linkError && !isMissingRelationError(linkError, "producer_regions")) return alert(linkError.message);
+      }
 
       const wineIds = vintages.map((v) => v.id);
       const { error } = await supabase

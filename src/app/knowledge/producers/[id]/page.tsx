@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { WineCard, groupWinesForCards, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
@@ -51,6 +52,11 @@ type Region = {
   countries: { id: number; name: string } | null;
 };
 
+type ProducerRegion = {
+  region_id: number;
+  regions: Region | null;
+};
+
 // ── Page ───────────────────────────────────────────────────────────────────────
 
 export default function ProducerDetailPage() {
@@ -63,6 +69,7 @@ export default function ProducerDetailPage() {
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [regions, setRegions] = useState<Region[]>([]);
+  const [producerRegions, setProducerRegions] = useState<Region[]>([]);
 
   const [editingName, setEditingName] = useState(false);
   const [nameText, setNameText] = useState("");
@@ -81,6 +88,13 @@ export default function ProducerDetailPage() {
   const [newRegionCountryText, setNewRegionCountryText] = useState("");
   const [newRegionPendingCountry, setNewRegionPendingCountry] = useState<EntityOption | null>(null);
   const [savingLocation, setSavingLocation] = useState(false);
+  const [addingActiveRegion, setAddingActiveRegion] = useState(false);
+  const [activeRegionText, setActiveRegionText] = useState("");
+  const [pendingActiveRegion, setPendingActiveRegion] = useState<Region | null>(null);
+  const [creatingActiveRegionName, setCreatingActiveRegionName] = useState<string | null>(null);
+  const [activeRegionCountryText, setActiveRegionCountryText] = useState("");
+  const [activeRegionPendingCountry, setActiveRegionPendingCountry] = useState<EntityOption | null>(null);
+  const [savingActiveRegion, setSavingActiveRegion] = useState(false);
 
   // Pending photos from PhotoPicker, uploaded on "Save photos"
   const [pendingPhotos, setPendingPhotos] = useState<PendingPhoto[]>([]);
@@ -98,7 +112,7 @@ export default function ProducerDetailPage() {
     });
 
     async function loadAll() {
-      const [producerRes, photosRes, winesRes, regionsRes, countriesRes] = await Promise.all([
+      const [producerRes, photosRes, winesRes, regionsRes, countriesRes, producerRegionsRes] = await Promise.all([
         supabase.from("producers").select("id,name,region_id,notes,cover_photo_url,regions(name,countries(name))").eq("id", id).maybeSingle(),
         supabase
           .from("producer_photos")
@@ -112,10 +126,15 @@ export default function ProducerDetailPage() {
           .order("name"),
         supabase.from("regions").select("id,name,country_id,countries(id,name)").order("name"),
         supabase.from("countries").select("id,name").order("name"),
+        supabase.from("producer_regions").select("region_id,regions(id,name,country_id,countries(id,name))").eq("producer_id", id),
       ]);
 
       if (producerRes.error) { alert(producerRes.error.message); return; }
       if (!producerRes.data) { setNotFound(true); return; }
+      if (producerRegionsRes.error && !isMissingRelationError(producerRegionsRes.error, "producer_regions")) {
+        alert(producerRegionsRes.error.message);
+        return;
+      }
 
       const p = producerRes.data as unknown as Producer;
       setProducer(p);
@@ -131,6 +150,13 @@ export default function ProducerDetailPage() {
       if (regionsRes.error) { alert(regionsRes.error.message); return; }
       setRegions((regionsRes.data ?? []) as unknown as Region[]);
       setAllCountries((countriesRes.data ?? []) as EntityOption[]);
+      const linkedRegions = ((producerRegionsRes.error ? [] : producerRegionsRes.data ?? []) as unknown as ProducerRegion[])
+        .map((entry) => entry.regions)
+        .filter((entry): entry is Region => entry !== null);
+      if (currentRegion && !linkedRegions.some((entry) => entry.id === currentRegion.id)) {
+        linkedRegions.push(currentRegion);
+      }
+      setProducerRegions(linkedRegions.sort((a, b) => a.name.localeCompare(b.name)));
     }
   }, [supabase, id]);
 
@@ -221,8 +247,19 @@ export default function ProducerDetailPage() {
     }
 
     const { error } = await supabase.from("producers").update({ region_id: newRegion?.id ?? null }).eq("id", producer.id);
+    if (error) { setSavingLocation(false); alert(error.message); return; }
+    if (newRegion) {
+      const { error: linkError } = await supabase
+        .from("producer_regions")
+        .upsert({ producer_id: producer.id, region_id: newRegion.id }, { onConflict: "producer_id,region_id" });
+      if (linkError && !isMissingRelationError(linkError, "producer_regions")) { setSavingLocation(false); alert(linkError.message); return; }
+      setProducerRegions(current => (
+        current.some((entry) => entry.id === newRegion!.id)
+          ? current
+          : [...current, newRegion!].sort((a, b) => a.name.localeCompare(b.name))
+      ));
+    }
     setSavingLocation(false);
-    if (error) { alert(error.message); return; }
 
     setProducer(current => current ? {
       ...current,
@@ -233,6 +270,101 @@ export default function ProducerDetailPage() {
     setNewRegionCountryText("");
     setNewRegionPendingCountry(null);
     setEditingLocation(false);
+  }
+
+  async function createRegion(name: string, countryText: string, pendingCountry: EntityOption | null): Promise<Region | null> {
+    let country: { id: number; name: string } | null = null;
+    const countryTrimmed = countryText.trim();
+    if (countryTrimmed) {
+      if (pendingCountry && pendingCountry.name.toLowerCase() === countryTrimmed.toLowerCase()) {
+        country = { id: pendingCountry.id, name: pendingCountry.name };
+      } else {
+        const existing = allCountries.find(c => c.name.toLowerCase() === countryTrimmed.toLowerCase());
+        if (existing) {
+          country = { id: existing.id, name: existing.name };
+        } else {
+          const { data, error } = await supabase.from("countries").insert({ name: countryTrimmed }).select("id,name").single();
+          if (error) { alert(error.message); return null; }
+          country = data as { id: number; name: string };
+          setAllCountries(cs => [...cs, { id: country!.id, name: country!.name }].sort((a, b) => a.name.localeCompare(b.name)));
+        }
+      }
+    }
+
+    const { data, error } = await supabase.from("regions").insert({ name, country_id: country?.id ?? null }).select("id,name,country_id").single();
+    if (error) { alert(error.message); return null; }
+    const newRegion = { id: (data as { id: number }).id, name, country_id: country?.id ?? null, countries: country ? { id: country.id, name: country.name } : null };
+    setRegions(current => [...current, newRegion].sort((a, b) => a.name.localeCompare(b.name)));
+    return newRegion;
+  }
+
+  function beginAddActiveRegion() {
+    setAddingActiveRegion(true);
+    setActiveRegionText("");
+    setPendingActiveRegion(null);
+    setCreatingActiveRegionName(null);
+    setActiveRegionCountryText("");
+    setActiveRegionPendingCountry(null);
+  }
+
+  async function saveActiveRegion() {
+    if (!producer) return;
+    setSavingActiveRegion(true);
+
+    let nextRegion: Region | null = null;
+    if (creatingActiveRegionName) {
+      nextRegion = await createRegion(creatingActiveRegionName, activeRegionCountryText, activeRegionPendingCountry);
+      if (!nextRegion) { setSavingActiveRegion(false); return; }
+    } else if (pendingActiveRegion) {
+      nextRegion = pendingActiveRegion;
+    } else {
+      setSavingActiveRegion(false);
+      alert("Please select a region from the list or create a new one.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("producer_regions")
+      .upsert({ producer_id: producer.id, region_id: nextRegion.id }, { onConflict: "producer_id,region_id" });
+    setSavingActiveRegion(false);
+    if (error && !isMissingRelationError(error, "producer_regions")) { alert(error.message); return; }
+
+    setProducerRegions(current => (
+      current.some((entry) => entry.id === nextRegion!.id)
+        ? current
+        : [...current, nextRegion!].sort((a, b) => a.name.localeCompare(b.name))
+    ));
+    setAddingActiveRegion(false);
+    setCreatingActiveRegionName(null);
+  }
+
+  async function setMainRegion(region: Region) {
+    if (!producer) return;
+    const { error } = await supabase.from("producers").update({ region_id: region.id }).eq("id", producer.id);
+    if (error) { alert(error.message); return; }
+    const { error: linkError } = await supabase.from("producer_regions").upsert({ producer_id: producer.id, region_id: region.id }, { onConflict: "producer_id,region_id" });
+    if (linkError && !isMissingRelationError(linkError, "producer_regions")) { alert(linkError.message); return; }
+    setProducer(current => current ? {
+      ...current,
+      region_id: region.id,
+      regions: { name: region.name, countries: region.countries ? { name: region.countries.name } : null },
+    } : current);
+  }
+
+  async function removeActiveRegion(region: Region) {
+    if (!producer) return;
+    if (producer.region_id === region.id) {
+      alert("Choose a different main region before removing this one.");
+      return;
+    }
+
+    const { error } = await supabase
+      .from("producer_regions")
+      .delete()
+      .eq("producer_id", producer.id)
+      .eq("region_id", region.id);
+    if (error && !isMissingRelationError(error, "producer_regions")) { alert(error.message); return; }
+    setProducerRegions(current => current.filter((entry) => entry.id !== region.id));
   }
 
   // ── Photos ─────────────────────────────────────────────────────────────────
@@ -316,8 +448,10 @@ export default function ProducerDetailPage() {
   );
 
   const coverUrl = producer.cover_photo_url ?? null;
-  const regionLabel = producer.regions?.name ?? "Unknown";
-  const countryLabel = producer.regions?.countries?.name ?? "Unknown";
+  const mainRegionId = producer.region_id;
+  const displayedRegions = producerRegions.length > 0
+    ? producerRegions
+    : regions.filter((region) => region.id === mainRegionId);
 
   return (
     <PageShell>
@@ -382,9 +516,9 @@ export default function ProducerDetailPage() {
         <Card className="mt-8">
           <div className="flex items-start justify-between gap-3">
             <div>
-              <CardTitle className="text-xl">Region Link</CardTitle>
+              <CardTitle className="text-xl">Regions</CardTitle>
               <CardDescription className="mt-2">
-                Producers can live under one region. Leave it blank to keep this producer in Unknown.
+                The main region controls where this producer is grouped in My Knowledge.
               </CardDescription>
             </div>
             {!editingLocation && (
@@ -439,7 +573,7 @@ export default function ProducerDetailPage() {
               ) : (
                 <>
                   <Field>
-                    <FieldLabel>Region</FieldLabel>
+                    <FieldLabel>Main region</FieldLabel>
                     <EntitySearchInput
                       options={regions.map(r => ({ id: r.id, name: r.name, hint: r.countries?.name ? `(${r.countries.name})` : undefined }))}
                       value={regionText}
@@ -468,15 +602,104 @@ export default function ProducerDetailPage() {
               )}
             </div>
           ) : (
-            <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-500">Region</div>
-                <div className="mt-1 text-sm font-medium text-stone-900">{regionLabel}</div>
-              </div>
-              <div className="rounded-2xl border border-stone-200 bg-stone-50/80 px-4 py-3">
-                <div className="text-xs uppercase tracking-[0.18em] text-stone-500">Country</div>
-                <div className="mt-1 text-sm font-medium text-stone-900">{countryLabel}</div>
-              </div>
+            <div className="mt-4 space-y-3">
+              {displayedRegions.length === 0 ? (
+                <p className="text-sm text-stone-500">No regions assigned.</p>
+              ) : (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {displayedRegions.map((region) => {
+                    const isMain = mainRegionId === region.id;
+                    return (
+                      <div key={region.id} className={`rounded-2xl border px-4 py-3 ${isMain ? "border-amber-300 bg-amber-50/70" : "border-stone-200 bg-stone-50/80"}`}>
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <div className="text-xs uppercase tracking-[0.18em] text-stone-500">Region</div>
+                            <Link href={`/knowledge/regions/${region.id}`} className="mt-1 block text-sm font-medium text-stone-900 underline-offset-2 hover:underline">
+                              {region.name}
+                            </Link>
+                            <div className="mt-0.5 text-xs text-stone-500">{region.countries?.name ?? "Country: NA"}</div>
+                          </div>
+                          {isMain && (
+                            <span className="rounded-full border border-amber-300 bg-white px-2 py-0.5 text-[11px] font-medium text-amber-800">Main</span>
+                          )}
+                        </div>
+                        <div className="mt-3 flex gap-2">
+                          {!isMain && (
+                            <>
+                              <button type="button" onClick={() => setMainRegion(region)} className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white">
+                                Make main
+                              </button>
+                              <button type="button" onClick={() => removeActiveRegion(region)} className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50">
+                                Remove
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {addingActiveRegion ? (
+                <div className="rounded-2xl border border-stone-200 bg-stone-50 p-3">
+                  {creatingActiveRegionName ? (
+                    <div className="space-y-3">
+                      <div className="rounded-xl bg-white px-3 py-2 text-sm text-stone-700">
+                        Creating region: <span className="font-medium">{creatingActiveRegionName}</span>
+                      </div>
+                      <Field>
+                        <FieldLabel>Country</FieldLabel>
+                        <EntitySearchInput
+                          options={allCountries}
+                          value={activeRegionCountryText}
+                          onChange={setActiveRegionCountryText}
+                          onSelect={(opt) => { setActiveRegionPendingCountry(opt); setActiveRegionCountryText(opt.name); }}
+                          onCreateNew={(name) => { setActiveRegionCountryText(name); setActiveRegionPendingCountry(null); }}
+                          placeholder="Search or create country..."
+                        />
+                      </Field>
+                    </div>
+                  ) : (
+                    <Field>
+                      <FieldLabel>Additional region</FieldLabel>
+                      <EntitySearchInput
+                        options={regions.map(r => ({ id: r.id, name: r.name, hint: r.countries?.name ? `(${r.countries.name})` : undefined }))}
+                        value={activeRegionText}
+                        onChange={(text) => { setActiveRegionText(text); setPendingActiveRegion(null); }}
+                        onSelect={(opt) => {
+                          const full = regions.find(r => r.id === opt.id) ?? null;
+                          setPendingActiveRegion(full);
+                          setActiveRegionText(opt.name);
+                        }}
+                        onCreateNew={(name) => { setCreatingActiveRegionName(name); setActiveRegionText(name); }}
+                        placeholder="Search or create region..."
+                      />
+                    </Field>
+                  )}
+                  <div className="mt-3 flex gap-2">
+                    <Button onClick={saveActiveRegion} disabled={savingActiveRegion}>
+                      {savingActiveRegion ? "Saving..." : "Save"}
+                    </Button>
+                    {creatingActiveRegionName && (
+                      <Button variant="secondary" onClick={() => setCreatingActiveRegionName(null)}>
+                        Back
+                      </Button>
+                    )}
+                    <Button variant="secondary" onClick={() => setAddingActiveRegion(false)}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  type="button"
+                  onClick={beginAddActiveRegion}
+                  className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+                >
+                  + Add region
+                </button>
+              )}
             </div>
           )}
         </Card>

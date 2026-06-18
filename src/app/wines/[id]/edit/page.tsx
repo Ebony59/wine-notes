@@ -5,6 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import GrapeTagInput from "@/components/GrapeTagInput";
 import { Button } from "@/components/ui/button";
@@ -273,10 +274,22 @@ export default function EditWinePage() {
         const { error: updateError } = await supabase.from("producers").update({ region_id: regionId }).eq("id", ex.id);
         if (updateError) throw updateError;
       }
+      if (regionId !== null) {
+        const { error: linkError } = await supabase
+          .from("producer_regions")
+          .upsert({ producer_id: ex.id, region_id: regionId }, { onConflict: "producer_id,region_id" });
+        if (linkError && !isMissingRelationError(linkError, "producer_regions")) throw linkError;
+      }
       return ex.id;
     }
     const { data: ins, error } = await supabase.from("producers").insert({ name: n, region_id: regionId }).select("id").single();
     if (error) throw error;
+    if (regionId !== null) {
+      const { error: linkError } = await supabase
+        .from("producer_regions")
+        .upsert({ producer_id: ins.id, region_id: regionId }, { onConflict: "producer_id,region_id" });
+      if (linkError && !isMissingRelationError(linkError, "producer_regions")) throw linkError;
+    }
     return ins.id;
   }
 
@@ -494,7 +507,7 @@ export default function EditWinePage() {
               onChange={setProducer}
               onSelect={autofillFromProducer}
               fetchSuggestions={async (q) => {
-                let qb = supabase
+                const qb = supabase
                   .from("producers")
                   .select("name")
                   .ilike("name", `%${q}%`);
@@ -507,7 +520,24 @@ export default function EditWinePage() {
                     if (countryRow?.id) regionQuery = regionQuery.eq("country_id", countryRow.id);
                   }
                   const { data: regionRow } = await regionQuery.maybeSingle();
-                  if (regionRow?.id) qb = qb.eq("region_id", regionRow.id);
+                  if (regionRow?.id) {
+                    const [mainRes, linkedRes] = await Promise.all([
+                      qb.eq("region_id", regionRow.id).limit(8),
+                      supabase
+                        .from("producer_regions")
+                        .select("producers!inner(name)")
+                        .eq("region_id", regionRow.id)
+                        .ilike("producers.name", `%${q}%`)
+                        .limit(8),
+                    ]);
+                    const names = new Set<string>();
+                    (mainRes.data ?? []).forEach((entry) => names.add(entry.name));
+                    ((linkedRes.data ?? []) as unknown as { producers: { name: string } | null }[])
+                      .forEach((entry) => {
+                        if (entry.producers?.name) names.add(entry.producers.name);
+                      });
+                    return Array.from(names).slice(0, 8);
+                  }
                 }
                 const { data } = await qb.limit(8);
                 return data?.map((d) => d.name) ?? [];

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { findExactGrapeSuggestion, sameGrapeName } from "@/lib/grape-utils";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import { VintageNotesList, type VintageNoteItem } from "@/components/VintageNotesList";
 import SearchableSelect from "@/components/SearchableSelect";
 import { Badge } from "@/components/ui/badge";
@@ -138,7 +139,7 @@ function LookupSection({ title, emptyText, items, onRename, onDelete, getItemHre
   }
 
   const fuse = useMemo(
-    () => new Fuse(items, { keys: ["label", "detail"], threshold: 0.35, ignoreLocation: true }),
+    () => new Fuse(items, { keys: ["label"], threshold: 0.35, ignoreLocation: true }),
     [items]
   );
 
@@ -279,7 +280,6 @@ function ProducerKnowledgeCard({
   addExtra,
 }: ProducerKnowledgeCardProps) {
   const [query, setQuery] = useState("");
-  const [regionQueries, setRegionQueries] = useState<Record<string, string>>({});
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const [adding, setAdding] = useState(false);
   const [addName, setAddName] = useState("");
@@ -299,19 +299,61 @@ function ProducerKnowledgeCard({
 
   const visibleGroups = groups
     .map((group) => {
-      const normalizedRegionQuery = (regionQueries[group.label] ?? "").trim().toLowerCase();
       const items = group.items.filter((producer) => {
-        const matchesGlobal =
-          !normalizedQuery ||
-          producer.name.toLowerCase().includes(normalizedQuery) ||
-          group.label.toLowerCase().includes(normalizedQuery);
-        const matchesRegion = !normalizedRegionQuery || producer.name.toLowerCase().includes(normalizedRegionQuery);
-        return matchesGlobal && matchesRegion;
+        return !normalizedQuery || producer.name.toLowerCase().includes(normalizedQuery);
       });
 
       return { ...group, items };
     })
-    .filter((group) => group.items.length > 0 || group.label.toLowerCase().includes(normalizedQuery));
+    .filter((group) => group.items.length > 0);
+  const visibleProducers = visibleGroups.flatMap((group) => group.items);
+
+  function renderProducerRow(producer: Producer) {
+    return (
+      <div key={producer.id} className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <Link
+            href={`/knowledge/producers/${producer.id}`}
+            className="group flex min-w-0 flex-1 items-center gap-1"
+          >
+            <div className="min-w-0">
+              <div className="text-sm font-medium text-stone-900 underline-offset-2 group-hover:underline">
+                {producer.name}
+              </div>
+            </div>
+            <svg className="ml-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </Link>
+          <div className="flex shrink-0 items-center gap-2">
+            <button
+              type="button"
+              onClick={() => onRename({ id: producer.id, label: producer.name })}
+              className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+            >
+              Rename
+            </button>
+            <button
+              type="button"
+              onClick={() => onDelete({ id: producer.id, label: producer.name })}
+              className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
+            >
+              Delete
+            </button>
+          </div>
+        </div>
+        <div className="mt-2">
+          <button
+            type="button"
+            onClick={() => onReassignRegion(producer)}
+            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
+          >
+            Set region
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <Card className="border-stone-300/80">
@@ -376,6 +418,10 @@ function ProducerKnowledgeCard({
 
       {visibleGroups.length === 0 ? (
         <p className="mt-4 text-sm text-stone-500">No producers match the current search.</p>
+      ) : normalizedQuery ? (
+        <div className="mt-4 max-h-[44rem] space-y-3 overflow-y-auto pr-1">
+          {visibleProducers.map((producer) => renderProducerRow(producer))}
+        </div>
       ) : (
         <div className="mt-4 max-h-[44rem] space-y-4 overflow-y-auto pr-1">
           {visibleGroups.map((group) => {
@@ -413,65 +459,9 @@ function ProducerKnowledgeCard({
               </button>
 
               {isExpanded && (
-                <>
-              <div className="mt-3">
-                <Input
-                  type="search"
-                  value={regionQueries[group.label] ?? ""}
-                  onChange={(e) => setRegionQueries((current) => ({ ...current, [group.label]: e.target.value }))}
-                  placeholder={`Search in ${group.label}`}
-                />
-              </div>
-
               <div className="mt-3 max-h-64 space-y-3 overflow-y-auto pr-1">
-                {group.items.map((producer) => {
-                  return (
-                    <div key={producer.id} className="rounded-2xl border border-stone-200 bg-white px-4 py-3">
-                      <div className="flex items-start justify-between gap-3">
-                        <Link
-                          href={`/knowledge/producers/${producer.id}`}
-                          className="group flex min-w-0 flex-1 items-center gap-1"
-                        >
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-stone-900 underline-offset-2 group-hover:underline">
-                              {producer.name}
-                            </div>
-                          </div>
-                          <svg className="ml-0.5 h-3.5 w-3.5 shrink-0 text-stone-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-                          </svg>
-                        </Link>
-                        <div className="flex shrink-0 items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => onRename({ id: producer.id, label: producer.name })}
-                            className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
-                          >
-                            Rename
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onDelete({ id: producer.id, label: producer.name })}
-                            className="rounded-full border border-rose-200 px-3 py-1 text-xs text-rose-600 transition hover:bg-rose-50"
-                          >
-                            Delete
-                          </button>
-                        </div>
-                      </div>
-                      <div className="mt-2">
-                        <button
-                          type="button"
-                          onClick={() => onReassignRegion(producer)}
-                          className="rounded-full border border-stone-300 px-3 py-1 text-xs text-stone-700 transition hover:border-stone-500 hover:bg-white"
-                        >
-                          Set region
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
+                {group.items.map((producer) => renderProducerRow(producer))}
               </div>
-                </>
               )}
             </div>
           );})}
@@ -942,6 +932,16 @@ export default function KnowledgePage() {
       .from("producers")
       .update({ region_id: nextRegion?.id ?? null })
       .eq("id", regionModalProducer.id);
+    if (!error && nextRegion) {
+      const { error: linkError } = await supabase
+        .from("producer_regions")
+        .upsert({ producer_id: regionModalProducer.id, region_id: nextRegion.id }, { onConflict: "producer_id,region_id" });
+      if (linkError && !isMissingRelationError(linkError, "producer_regions")) {
+        setBusyKey(null);
+        setSavingProducerRegion(false);
+        return alert(linkError.message);
+      }
+    }
     setBusyKey(null);
     setSavingProducerRegion(false);
     if (error) return alert(error.message);
@@ -1026,8 +1026,14 @@ export default function KnowledgePage() {
       return entry.country_id === country.id;
     });
 
-    const { error } = await supabase.from("producers").insert({ name, region_id: region?.id ?? null });
+    const { data, error } = await supabase.from("producers").insert({ name, region_id: region?.id ?? null }).select("id").single();
     if (error) return alert(error.message);
+    if (region?.id && data?.id) {
+      const { error: linkError } = await supabase
+        .from("producer_regions")
+        .upsert({ producer_id: data.id, region_id: region.id }, { onConflict: "producer_id,region_id" });
+      if (linkError && !isMissingRelationError(linkError, "producer_regions")) return alert(linkError.message);
+    }
     setNewProducerCountry("");
     setNewProducerRegion("");
     await loadLookups();

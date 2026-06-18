@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import { PhotoPicker } from "@/components/PhotoPicker";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import GrapeTagInput from "@/components/GrapeTagInput";
@@ -345,11 +346,23 @@ export default function AddWinePage() {
           .eq("id", existing.id);
         if (updateError) throw updateError;
       }
+      if (regionId !== null) {
+        const { error: linkError } = await supabase
+          .from("producer_regions")
+          .upsert({ producer_id: existing.id, region_id: regionId }, { onConflict: "producer_id,region_id" });
+        if (linkError && !isMissingRelationError(linkError, "producer_regions")) throw linkError;
+      }
       return existing.id;
     }
     const { data: inserted, error: insErr } = await supabase
       .from("producers").insert({ name: producerName, region_id: regionId }).select("id").single();
     if (insErr) throw insErr;
+    if (regionId !== null) {
+      const { error: linkError } = await supabase
+        .from("producer_regions")
+        .upsert({ producer_id: inserted.id, region_id: regionId }, { onConflict: "producer_id,region_id" });
+      if (linkError && !isMissingRelationError(linkError, "producer_regions")) throw linkError;
+    }
     return inserted.id;
   }
 
@@ -748,7 +761,7 @@ export default function AddWinePage() {
                 onSelect={autofillFromProducer}
                 placeholder="e.g. Domaine de la Romanée-Conti"
                 fetchSuggestions={async (q) => {
-                  let qb = supabase.from("producers").select("name").ilike("name", `%${q}%`);
+                  const qb = supabase.from("producers").select("name").ilike("name", `%${q}%`);
                   const regionName = region.trim().toUpperCase() !== "NA" ? region.trim() : null;
                   if (regionName) {
                     const countryName = country.trim().toUpperCase() !== "NA" ? country.trim() : null;
@@ -758,7 +771,24 @@ export default function AddWinePage() {
                       if (countryRow?.id) regionQuery = regionQuery.eq("country_id", countryRow.id);
                     }
                     const { data: regionRow } = await regionQuery.maybeSingle();
-                    if (regionRow?.id) qb = qb.eq("region_id", regionRow.id);
+                    if (regionRow?.id) {
+                      const [mainRes, linkedRes] = await Promise.all([
+                        qb.eq("region_id", regionRow.id).limit(8),
+                        supabase
+                          .from("producer_regions")
+                          .select("producers!inner(name)")
+                          .eq("region_id", regionRow.id)
+                          .ilike("producers.name", `%${q}%`)
+                          .limit(8),
+                      ]);
+                      const names = new Set<string>();
+                      (mainRes.data ?? []).forEach((entry) => names.add(entry.name));
+                      ((linkedRes.data ?? []) as unknown as { producers: { name: string } | null }[])
+                        .forEach((entry) => {
+                          if (entry.producers?.name) names.add(entry.producers.name);
+                        });
+                      return Array.from(names).slice(0, 8);
+                    }
                   }
                   const { data } = await qb.limit(8);
                   return data?.map((d) => d.name) ?? [];

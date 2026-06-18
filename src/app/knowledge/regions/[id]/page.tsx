@@ -7,6 +7,7 @@ import { useParams } from "next/navigation";
 import { WineCard, type WineCardWine } from "@/components/WineCard";
 import { createClient } from "@/lib/supabase/client";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 import { CoverPhoto } from "@/components/CoverPhoto";
 import { CoverPhotoGrid } from "@/components/CoverPhotoGrid";
 import { NotesEditBar } from "@/components/NotesEditBar";
@@ -51,6 +52,10 @@ type Subregion = {
 type Producer = {
   id: number;
   name: string;
+};
+
+type ProducerRegion = {
+  producers: Producer | null;
 };
 
 type Wine = WineCardWine & {
@@ -169,10 +174,11 @@ export default function RegionDetailPage() {
     });
 
     async function loadAll() {
-      const [regionRes, photosRes, subregionsRes, producersRes, winesRes, vintagesRes, countriesRes] = await Promise.all([
+      const [regionRes, photosRes, subregionsRes, producerRegionsRes, fallbackProducersRes, winesRes, vintagesRes, countriesRes] = await Promise.all([
         supabase.from("regions").select("id,name,notes,cover_photo_url,country_id,countries(id,name)").eq("id", id).maybeSingle(),
         supabase.from("region_photos").select("id,storage_path,external_url").eq("region_id", id).order("created_at", { ascending: true }),
         supabase.from("subregions").select("id,name").eq("region_id", id).order("name"),
+        supabase.from("producer_regions").select("producers(id,name)").eq("region_id", id),
         supabase.from("producers").select("id,name").eq("region_id", id).order("name"),
         supabase.from("wines").select("id,name,vintage_year,producer_id,producers(id,name),countries(name),regions(name),subregions(name)").eq("region_id", id).order("name"),
         supabase.from("vintages").select("region_id,year,notes").eq("region_id", id).order("year", { ascending: false }),
@@ -181,6 +187,10 @@ export default function RegionDetailPage() {
 
       if (regionRes.error) { alert(regionRes.error.message); return; }
       if (!regionRes.data) { setNotFound(true); return; }
+      if (producerRegionsRes.error && !isMissingRelationError(producerRegionsRes.error, "producer_regions")) {
+        alert(producerRegionsRes.error.message);
+        return;
+      }
 
       const r = regionRes.data as unknown as Region;
       setRegion(r);
@@ -190,7 +200,13 @@ export default function RegionDetailPage() {
       setAllCountries((countriesRes.data ?? []) as EntityOption[]);
       setPhotos((photosRes.data ?? []) as unknown as RegionPhoto[]);
       setSubregions((subregionsRes.data ?? []) as unknown as Subregion[]);
-      setProducers((producersRes.data ?? []) as unknown as Producer[]);
+      const linkedProducers = producerRegionsRes.error
+        ? ((fallbackProducersRes.data ?? []) as unknown as Producer[])
+        : ((producerRegionsRes.data ?? []) as unknown as ProducerRegion[])
+            .map((entry) => entry.producers)
+            .filter((entry): entry is Producer => entry !== null)
+            .sort((a, b) => a.name.localeCompare(b.name));
+      setProducers(linkedProducers);
       setWines((winesRes.data ?? []) as unknown as Wine[]);
       setVintages((vintagesRes.data ?? []) as unknown as Vintage[]);
     }
@@ -381,7 +397,7 @@ export default function RegionDetailPage() {
     for (const [name, ws] of winesByProducer) {
       if (name !== "__none__" && !knownNames.has(name)) {
         const nameGroups = buildNameGroups(ws);
-        groups.push({ producerId: null, producerName: name, nameGroups, wineCount: nameGroups.length });
+        groups.push({ producerId: ws[0]?.producers?.id ?? null, producerName: name, nameGroups, wineCount: nameGroups.length });
       }
     }
 

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { isMissingRelationError } from "@/lib/supabase-errors";
 
 type RegionRow = {
   id: number;
@@ -21,6 +22,11 @@ type ProducerRow = {
   id: number;
   name: string;
   region_id: number | null;
+};
+
+type ProducerRegionRow = {
+  producer_id: number;
+  region_id: number;
 };
 
 type RegionCandidate = {
@@ -180,7 +186,24 @@ export async function findProducerHierarchy(
   if (error) throw error;
 
   const producers = (data ?? []) as ProducerRow[];
-  const regionIds = uniqueNumbers(producers.map((producer) => producer.region_id));
+  const producerIds = producers.map((producer) => producer.id);
+
+  const { data: producerRegionData, error: producerRegionError } = producerIds.length > 0
+    ? await client
+        .from("producer_regions")
+        .select("producer_id,region_id")
+        .in("producer_id", producerIds)
+    : { data: [], error: null };
+
+  if (producerRegionError && !isMissingRelationError(producerRegionError, "producer_regions")) {
+    throw producerRegionError;
+  }
+
+  const producerRegions = (producerRegionError ? [] : producerRegionData ?? []) as ProducerRegionRow[];
+  const regionIds = uniqueNumbers([
+    ...producers.map((producer) => producer.region_id),
+    ...producerRegions.map((producerRegion) => producerRegion.region_id),
+  ]);
 
   const regionMap = new Map<number, { name: string; countryName: string | null }>();
   if (regionIds.length > 0) {
@@ -203,14 +226,30 @@ export async function findProducerHierarchy(
   }
 
   const matches = producers
-    .map((entry) => {
-      const region = entry.region_id ? (regionMap.get(entry.region_id) ?? null) : null;
+    .flatMap((entry) => {
+      const linkedRegionIds = new Set<number>();
+      if (entry.region_id) linkedRegionIds.add(entry.region_id);
+      producerRegions
+        .filter((producerRegion) => producerRegion.producer_id === entry.id)
+        .forEach((producerRegion) => linkedRegionIds.add(producerRegion.region_id));
 
-      return {
-        producerName: entry.name,
-        regionName: region?.name ?? null,
-        countryName: region?.countryName ?? null,
-      };
+      if (linkedRegionIds.size === 0) {
+        return [{
+          producerName: entry.name,
+          regionName: null,
+          countryName: null,
+        }];
+      }
+
+      return Array.from(linkedRegionIds).map((regionId) => {
+        const region = regionMap.get(regionId) ?? null;
+
+        return {
+          producerName: entry.name,
+          regionName: region?.name ?? null,
+          countryName: region?.countryName ?? null,
+        };
+      });
     })
     .filter((candidate) => !regionName || candidate.regionName === regionName)
     .filter((candidate) => !countryName || candidate.countryName === countryName);
