@@ -8,6 +8,7 @@ import { WineMetaLine } from "@/components/WineMetaLine";
 import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { isMissingRelationError } from "@/lib/supabase-errors";
+import { deleteWineVintages } from "@/lib/wine-delete";
 import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
@@ -82,6 +83,8 @@ export default function WineGroupPage() {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
   const [redirectHref, setRedirectHref] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingWine, setDeletingWine] = useState(false);
 
   // Inline wine detail editing
   const [editingWine, setEditingWine] = useState(false);
@@ -251,6 +254,33 @@ export default function WineGroupPage() {
 
     setSavedNotes(notes.trim());
     setEditing(false);
+  }
+
+  async function deleteEntireWine() {
+    if (!userId || deletingWine) return;
+
+    setDeletingWine(true);
+    try {
+      const { storageCleanupError } = await deleteWineVintages({
+        supabase,
+        wineIds: vintages.map((vintage) => vintage.id),
+        groupNote: {
+          userId,
+          wineName: decodedName,
+          producerId: numericProducerId,
+          deleteGroupNote: true,
+        },
+      });
+
+      if (storageCleanupError) {
+        alert(`This wine was deleted, but some uploaded photo files could not be removed: ${storageCleanupError}`);
+      }
+
+      location.href = "/wines";
+    } catch (error) {
+      setDeletingWine(false);
+      alert(error instanceof Error ? error.message : "Failed to delete this wine.");
+    }
   }
 
   function openEditWine() {
@@ -427,6 +457,11 @@ export default function WineGroupPage() {
 
   // Show the first cover photo found across any vintage
   const coverUrl = groupCoverUrl;
+  const deleteWineName = vintages[0]?.name ?? decodedName;
+  const deleteImpact =
+    vintages.length === 0
+      ? `This will remove ${deleteWineName} and its general notes. Knowledge notes will remain.`
+      : `This will remove ${deleteWineName} across all ${vintages.length} ${vintages.length === 1 ? "vintage" : "vintages"}, including tasting notes, photos, and general notes. Knowledge notes will remain.`;
 
   if (loading) {
     return (
@@ -441,7 +476,7 @@ export default function WineGroupPage() {
   return (
     <PageShell>
       <PageContainer className="max-w-3xl pb-16">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <PageHero>
             <Eyebrow>
               <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
@@ -462,15 +497,24 @@ export default function WineGroupPage() {
             <WineMetaLine items={metaItems} />
             {grapeItems.length > 0 && <WineMetaBar items={grapeItems} className="mt-3" />}
           </PageHero>
-          {vintages.length > 0 && (
+          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:mt-4 sm:justify-end">
+            {vintages.length > 0 && (
+              <Button
+                variant="secondary"
+                className="rounded-2xl px-4"
+                onClick={() => (editingWine ? setEditingWine(false) : openEditWine())}
+              >
+                {editingWine ? "Cancel" : "Edit Wine"}
+              </Button>
+            )}
             <Button
-              variant="secondary"
-              className="mt-4 shrink-0 rounded-2xl px-4"
-              onClick={() => (editingWine ? setEditingWine(false) : openEditWine())}
+              variant="danger"
+              className="rounded-2xl px-4"
+              onClick={() => setShowDeleteConfirm(true)}
             >
-              {editingWine ? "Cancel" : "Edit Wine"}
+              Delete Wine
             </Button>
-          )}
+          </div>
         </div>
 
         {editingWine && (
@@ -689,6 +733,39 @@ export default function WineGroupPage() {
           </Card>
         )}
       </PageContainer>
+
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4 backdrop-blur-sm"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[28px] border border-stone-200 bg-white/95 p-6 shadow-[0_24px_60px_rgba(88,56,34,0.18)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-serif text-2xl text-stone-900">Delete this wine?</p>
+            <p className="mt-2 text-sm text-stone-600">
+              {deleteImpact}
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingWine}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={deleteEntireWine}
+                disabled={deletingWine}
+              >
+                {deletingWine ? "Deleting..." : "Yes, delete"}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </PageShell>
   );
 }

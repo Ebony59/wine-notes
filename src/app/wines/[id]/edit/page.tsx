@@ -6,6 +6,7 @@ import { useParams } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { findProducerHierarchy, findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { isMissingRelationError } from "@/lib/supabase-errors";
+import { deleteWineVintages } from "@/lib/wine-delete";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import GrapeTagInput from "@/components/GrapeTagInput";
 import { Button } from "@/components/ui/button";
@@ -58,6 +59,8 @@ export default function EditWinePage() {
   const [loaded, setLoaded] = useState(false);
   const [notFound, setNotFound] = useState(false);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [wineForDelete, setWineForDelete] = useState<{ name: string; producerId: number | null } | null>(null);
 
   const [name, setName] = useState("");
   const [vintage, setVintage] = useState("");
@@ -70,7 +73,9 @@ export default function EditWinePage() {
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
-      if (!data.session?.user) { location.href = "/"; return; }
+      const uid = data.session?.user?.id ?? null;
+      if (!uid) { location.href = "/"; return; }
+      setUserId(uid);
       loadWine();
     });
 
@@ -78,7 +83,7 @@ export default function EditWinePage() {
       const { data, error } = await supabase
         .from("wines")
         .select(`
-          id, name, vintage_year, wine_type,
+          id, name, vintage_year, wine_type, producer_id,
           producers(name), countries(name), regions(name), subregions(name)
         `)
         .eq("id", id)
@@ -88,6 +93,10 @@ export default function EditWinePage() {
       if (!data) { setNotFound(true); return; }
 
       setName(data.name ?? "");
+      setWineForDelete({
+        name: data.name ?? "",
+        producerId: (data as unknown as { producer_id: number | null }).producer_id ?? null,
+      });
       setVintage(data.vintage_year?.toString() ?? "");
       setWineType((data as unknown as { wine_type: string | null }).wine_type ?? "");
       const typed = data as unknown as EditableWine;
@@ -294,12 +303,22 @@ export default function EditWinePage() {
   }
 
   async function deleteWine() {
-    try {
-      const { error: deleteGrapesError } = await supabase.from("wine_grapes").delete().eq("wine_id", id);
-      if (deleteGrapesError) return alert(deleteGrapesError.message);
+    if (!userId || !wineForDelete) return;
 
-      const { error } = await supabase.from("wines").delete().eq("id", id);
-      if (error) return alert(error.message);
+    try {
+      const { storageCleanupError } = await deleteWineVintages({
+        supabase,
+        wineIds: [id],
+        groupNote: {
+          userId,
+          wineName: wineForDelete.name,
+          producerId: wineForDelete.producerId,
+        },
+      });
+
+      if (storageCleanupError) {
+        alert(`This wine entry was deleted, but some uploaded photo files could not be removed: ${storageCleanupError}`);
+      }
 
       location.href = "/wines";
     } catch (error) {

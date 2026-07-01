@@ -713,7 +713,7 @@ export default function KnowledgePage() {
       supabase.from("regions").select("id,name,country_id,notes,countries(name)").order("name"),
       supabase.from("subregions").select("id,name,region_id,notes,regions(name)").order("name"),
       supabase.from("grapes").select("id,name,notes,grape_aliases(name)").order("name"),
-      supabase.from("producers").select("id,name,region_id,notes,regions(name)").order("name"),
+      supabase.from("producers").select("id,name,region_id,notes,regions:regions!producers_region_id_fkey(name)").order("name"),
       supabase.from("vintages").select("region_id,year,notes,regions(name,countries(name))").order("year", { ascending: false }),
     ]);
 

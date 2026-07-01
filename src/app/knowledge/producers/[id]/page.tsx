@@ -113,7 +113,7 @@ export default function ProducerDetailPage() {
 
     async function loadAll() {
       const [producerRes, photosRes, winesRes, regionsRes, countriesRes, producerRegionsRes] = await Promise.all([
-        supabase.from("producers").select("id,name,region_id,notes,cover_photo_url,regions(name,countries(name))").eq("id", id).maybeSingle(),
+        supabase.from("producers").select("id,name,region_id,notes,cover_photo_url,regions:regions!producers_region_id_fkey(name,countries(name))").eq("id", id).maybeSingle(),
         supabase
           .from("producer_photos")
           .select("id,storage_path,external_url")
@@ -126,7 +126,7 @@ export default function ProducerDetailPage() {
           .order("name"),
         supabase.from("regions").select("id,name,country_id,countries(id,name)").order("name"),
         supabase.from("countries").select("id,name").order("name"),
-        supabase.from("producer_regions").select("region_id,regions(id,name,country_id,countries(id,name))").eq("producer_id", id),
+        supabase.from("producer_regions").select("region_id,regions:regions!producer_regions_region_id_fkey(id,name,country_id,countries(id,name))").eq("producer_id", id),
       ]);
 
       if (producerRes.error) { alert(producerRes.error.message); return; }

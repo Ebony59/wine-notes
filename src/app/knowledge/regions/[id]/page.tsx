@@ -178,7 +178,7 @@ export default function RegionDetailPage() {
         supabase.from("regions").select("id,name,notes,cover_photo_url,country_id,countries(id,name)").eq("id", id).maybeSingle(),
         supabase.from("region_photos").select("id,storage_path,external_url").eq("region_id", id).order("created_at", { ascending: true }),
         supabase.from("subregions").select("id,name").eq("region_id", id).order("name"),
-        supabase.from("producer_regions").select("producers(id,name)").eq("region_id", id),
+        supabase.from("producer_regions").select("producers:producers!producer_regions_producer_id_fkey(id,name)").eq("region_id", id),
         supabase.from("producers").select("id,name").eq("region_id", id).order("name"),
         supabase.from("wines").select("id,name,vintage_year,producer_id,producers(id,name),countries(name),regions(name),subregions(name)").eq("region_id", id).order("name"),
         supabase.from("vintages").select("region_id,year,notes").eq("region_id", id).order("year", { ascending: false }),

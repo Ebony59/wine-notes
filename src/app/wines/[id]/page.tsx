@@ -10,6 +10,7 @@ import { createClient } from "@/lib/supabase/client";
 import { findRegionHierarchy, findSubregionHierarchy } from "@/lib/location-autofill";
 import { convertIfNeeded, type PendingPhoto } from "@/lib/photo-utils";
 import { isMissingRelationError } from "@/lib/supabase-errors";
+import { deleteWineVintages } from "@/lib/wine-delete";
 import { formatGrapeDisplayName, type WineGrapeRow } from "@/lib/grape-utils";
 import AutocompleteInput from "@/components/AutocompleteInput";
 import { CoverPhoto } from "@/components/CoverPhoto";
@@ -115,6 +116,8 @@ export default function WineDetailPage() {
   const [vintageNote, setVintageNote] = useState<VintageKnowledge | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deletingVintage, setDeletingVintage] = useState(false);
 
   // Inline wine detail editing
   const [editingWine, setEditingWine] = useState(false);
@@ -456,6 +459,32 @@ export default function WineDetailPage() {
     setPhotos(ps => ps.filter(p => p.tasting_id !== tid));
   }
 
+  async function deleteCurrentVintage() {
+    if (!wine || !userId || deletingVintage) return;
+
+    setDeletingVintage(true);
+    try {
+      const { storageCleanupError } = await deleteWineVintages({
+        supabase,
+        wineIds: [id],
+        groupNote: {
+          userId,
+          wineName: wine.name,
+          producerId: wine.producer_id,
+        },
+      });
+
+      if (storageCleanupError) {
+        alert(`This vintage was deleted, but some uploaded photo files could not be removed: ${storageCleanupError}`);
+      }
+
+      location.href = getWineGroupHref(wine);
+    } catch (error) {
+      setDeletingVintage(false);
+      alert(error instanceof Error ? error.message : "Failed to delete this vintage.");
+    }
+  }
+
   // ── Photo CRUD ───────────────────────────────────────────────────────────────
 
   async function addPhotoByUrl(target: string) {
@@ -694,7 +723,7 @@ export default function WineDetailPage() {
   return (
     <PageShell>
       <PageContainer className="max-w-4xl pb-16">
-        <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
           <PageHero>
             <Eyebrow>
               <Link href="/wines" className="inline-flex items-center gap-1 hover:text-stone-700">
@@ -712,13 +741,22 @@ export default function WineDetailPage() {
             <WineMetaLine items={metaItems} />
             {grapeItems.length > 0 && <WineMetaBar items={grapeItems} className="mt-3" />}
           </PageHero>
-          <Button
-            variant="secondary"
-            className="mt-4 shrink-0 rounded-2xl px-4"
-            onClick={() => (editingWine ? setEditingWine(false) : openEditWine())}
-          >
-            {editingWine ? "Cancel" : "Edit Wine"}
-          </Button>
+          <div className="flex shrink-0 flex-wrap items-center gap-2 sm:mt-4 sm:justify-end">
+            <Button
+              variant="secondary"
+              className="rounded-2xl px-4"
+              onClick={() => (editingWine ? setEditingWine(false) : openEditWine())}
+            >
+              {editingWine ? "Cancel" : "Edit Wine"}
+            </Button>
+            <Button
+              variant="danger"
+              className="rounded-2xl px-4"
+              onClick={() => setShowDeleteConfirm(true)}
+            >
+              Delete Vintage
+            </Button>
+          </div>
         </div>
 
         {editingWine && (
@@ -1095,6 +1133,39 @@ export default function WineDetailPage() {
             </button>
             <div className="overflow-hidden rounded-[28px] bg-stone-950 shadow-2xl">
               <img src={wine.cover_photo_url} alt={wine.name} className="max-h-[85vh] w-full object-contain" />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showDeleteConfirm && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-stone-900/40 px-4 backdrop-blur-sm"
+          onClick={() => setShowDeleteConfirm(false)}
+        >
+          <div
+            className="w-full max-w-sm rounded-[28px] border border-stone-200 bg-white/95 p-6 shadow-[0_24px_60px_rgba(88,56,34,0.18)]"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p className="font-serif text-2xl text-stone-900">Delete this vintage?</p>
+            <p className="mt-2 text-sm text-stone-600">
+              This will remove {wine.name} {wine.vintage_year ?? "NV"}, including its tasting notes and photos. Other vintages and knowledge notes will remain.
+            </p>
+            <div className="mt-6 flex justify-end gap-3">
+              <Button
+                variant="secondary"
+                onClick={() => setShowDeleteConfirm(false)}
+                disabled={deletingVintage}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="danger"
+                onClick={deleteCurrentVintage}
+                disabled={deletingVintage}
+              >
+                {deletingVintage ? "Deleting..." : "Yes, delete"}
+              </Button>
             </div>
           </div>
         </div>
